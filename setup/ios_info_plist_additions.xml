@@ -1,0 +1,13 @@
+<!-- ios/Runner/Info.plist -->
+<!-- Add inside the main <dict>: -->
+<key>CFBundleURLTypes</key>
+<array>
+    <dict>
+        <key>CFBundleTypeRole</key>
+        <string>Editor</string>
+        <key>CFBundleURLSchemes</key>
+        <array>
+            <string>io.promptwise.app</string>
+        </array>
+    </dict>
+</array>

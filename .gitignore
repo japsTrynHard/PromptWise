@@ -44,4 +44,20 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 
-lib.zip
+
+# Node / Supabase CLI
+node_modules/
+
+# Environment variables and secrets
+.env
+.env.*
+*.secret
+
+# Database export for school submission only
+PromptWise_Database.sql
+
+# Local Supabase temporary files
+supabase/.temp/
+
+# Local packaged files
+*.zip

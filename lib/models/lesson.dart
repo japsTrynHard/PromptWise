@@ -3,12 +3,14 @@ class Lesson {
   final String title;
   final String content;
   final int estimatedMinutes;
+  final String quizId;
 
   const Lesson({
     required this.id,
     required this.title,
     required this.content,
     required this.estimatedMinutes,
+    required this.quizId,
   });
 }
 

@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 
+import '../../utils/constants.dart';
+import 'app_card.dart';
+
 class PromptScoreWidget extends StatelessWidget {
   final double clarity;
-  final double context; // This is a double
+  final double context;
   final double specificity;
   final double responsibility;
   final double overall;
@@ -18,97 +21,96 @@ class PromptScoreWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.grey.shade200),
-      ),
+    final safeOverall = overall.clamp(0.0, 1.0).toDouble();
+
+    return AppCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Text(
-                'Prompt Score',
-                style: Theme.of(
-                  context,
-                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+              Expanded(
+                child: Text(
+                  'Prompt Review',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
               ),
-              const Spacer(),
               Text(
-                '${(overall * 100).toInt()}%',
-                style: TextStyle(
+                '${(safeOverall * 100).round()}%',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
                   fontWeight: FontWeight.bold,
-                  fontSize: 18,
-                  color: overall >= 0.8 ? Colors.green : Colors.orange,
+                  color: _scoreColor(safeOverall),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 12),
-          Row(
-            children: List.generate(
-              5,
-              (i) => Icon(
-                i < (overall * 5).round() ? Icons.star : Icons.star_border,
-                color: Colors.amber,
-                size: 24,
-              ),
+          const SizedBox(height: AppSpacing.sm),
+          Text(
+            'This score is a learning guide, not a single correct judgment.',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
             ),
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: AppSpacing.xl),
           _ScoreBar(label: 'Clarity', value: clarity),
-          _ScoreBar(
-            label: 'Context',
-            value: this.context, // FIXED: Explicitly use the class property
-          ),
+          _ScoreBar(label: 'Context', value: this.context),
           _ScoreBar(label: 'Specificity', value: specificity),
           _ScoreBar(label: 'Responsible Use', value: responsibility),
         ],
       ),
     );
   }
+
+  Color _scoreColor(double value) {
+    if (value >= 0.8) return AppColors.success;
+    if (value >= 0.5) return AppColors.warning;
+    return AppColors.danger;
+  }
 }
 
 class _ScoreBar extends StatelessWidget {
   final String label;
   final double value;
+
   const _ScoreBar({required this.label, required this.value});
 
   @override
   Widget build(BuildContext context) {
+    final safeValue = value.clamp(0.0, 1.0).toDouble();
+    final color = safeValue >= 0.8
+        ? AppColors.success
+        : safeValue >= 0.5
+        ? AppColors.warning
+        : AppColors.danger;
+
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: Row(
+      padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(
-            width: 90,
-            child: Text(label, style: Theme.of(context).textTheme.bodyMedium),
-          ),
-          Expanded(
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(6),
-              child: LinearProgressIndicator(
-                value: value,
-                minHeight: 10,
-                backgroundColor: Colors.grey.shade200,
-                color: value > 0.7
-                    ? Colors.green
-                    : value > 0.4
-                    ? Colors.orange
-                    : Colors.red,
+          Row(
+            children: [
+              Expanded(child: Text(label)),
+              Text(
+                '${(safeValue * 100).round()}%',
+                style: Theme.of(
+                  context,
+                ).textTheme.labelMedium?.copyWith(fontWeight: FontWeight.w600),
               ),
-            ),
+            ],
           ),
-          const SizedBox(width: 10),
-          SizedBox(
-            width: 35,
-            child: Text(
-              '${(value * 100).toInt()}%',
-              style: Theme.of(context).textTheme.bodySmall,
-              textAlign: TextAlign.end,
+          const SizedBox(height: AppSpacing.sm),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(AppRadius.sm),
+            child: LinearProgressIndicator(
+              value: safeValue,
+              minHeight: 10,
+              backgroundColor: Theme.of(
+                context,
+              ).colorScheme.surfaceContainerHighest,
+              color: color,
             ),
           ),
         ],

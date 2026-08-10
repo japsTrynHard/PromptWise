@@ -1,15 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../../controllers/progress_controller.dart';
-import '../../data/modules_data.dart';
-import '../widgets/module_card.dart';
-import '../widgets/progress_ring.dart';
-import 'game_screen.dart';
-import 'module_list_screen.dart';
-import 'news_screen.dart';
+import '../../controllers/auth_controller.dart';
+import '../../routes/app_routes.dart';
+import '../../utils/constants.dart';
+import '../widgets/app_logo.dart';
+import 'home_screen.dart';
+import 'learn_screen.dart';
+import 'practice_screen.dart';
 import 'profile_screen.dart';
-import 'sandbox_screen.dart';
+import 'verify_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -21,174 +21,198 @@ class DashboardScreen extends StatefulWidget {
 class _DashboardScreenState extends State<DashboardScreen> {
   int _currentIndex = 0;
 
-  static const List<Widget> _pages = [
-    _DashboardContent(),
-    NewsScreen(),
+  static const _destinations = <_Destination>[
+    _Destination(
+      label: 'Home',
+      icon: Icons.home_outlined,
+      selectedIcon: Icons.home_rounded,
+    ),
+    _Destination(
+      label: 'Learn',
+      icon: Icons.menu_book_outlined,
+      selectedIcon: Icons.menu_book_rounded,
+    ),
+    _Destination(
+      label: 'Practice',
+      icon: Icons.edit_note_outlined,
+      selectedIcon: Icons.edit_note_rounded,
+    ),
+    _Destination(
+      label: 'Verify',
+      icon: Icons.image_search_outlined,
+      selectedIcon: Icons.image_search_rounded,
+    ),
+    _Destination(
+      label: 'Profile',
+      icon: Icons.person_outline_rounded,
+      selectedIcon: Icons.person_rounded,
+    ),
+  ];
+
+  static const _pages = <Widget>[
+    HomeScreen(),
+    LearnScreen(),
+    PracticeScreen(),
+    VerifyScreen(),
     ProfileScreen(),
   ];
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: IndexedStack(
-        index: _currentIndex,
-        children: _pages,
-      ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _currentIndex,
-        onDestinationSelected: (index) {
-          setState(() => _currentIndex = index);
-        },
-        destinations: const [
-          NavigationDestination(
-            icon: Icon(Icons.home_outlined),
-            selectedIcon: Icon(Icons.home_rounded),
-            label: 'Home',
+  void _select(int index) {
+    if (_currentIndex == index) return;
+    setState(() => _currentIndex = index);
+  }
+
+  Future<void> _signOut() async {
+    final auth = context.read<AuthController>();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Sign out?'),
+        content: const Text(
+          'Your saved progress will remain connected to this account.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
           ),
-          NavigationDestination(
-            icon: Icon(Icons.article_outlined),
-            selectedIcon: Icon(Icons.article_rounded),
-            label: 'Awareness',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.person_outline_rounded),
-            selectedIcon: Icon(Icons.person_rounded),
-            label: 'Profile',
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Sign out'),
           ),
         ],
       ),
     );
-  }
-}
 
-class _DashboardContent extends StatelessWidget {
-  const _DashboardContent();
+    if (confirmed != true || !mounted) return;
+    final success = await auth.signOut();
+    if (!mounted) return;
+
+    if (!success) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(auth.errorMessage ?? 'Sign out failed.')),
+      );
+      return;
+    }
+
+    Navigator.pushNamedAndRemoveUntil(context, AppRoutes.root, (_) => false);
+  }
 
   @override
   Widget build(BuildContext context) {
-    final progress = context.watch<ProgressController>().progress;
+    final auth = context.watch<AuthController>();
 
-    return SafeArea(
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Hello, Learner!',
-              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              'AI knowledge level: ${progress.knowledgeLevel}',
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: Colors.grey[600],
-                  ),
-            ),
-            const SizedBox(height: 24),
-            const Center(child: ProgressRing()),
-            const SizedBox(height: 32),
-            Row(
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final useRail = constraints.maxWidth >= AppBreakpoints.tablet;
+        final extendedRail = constraints.maxWidth >= AppBreakpoints.desktop;
+        final veryCompact = constraints.maxWidth < 360;
+
+        // A direct page switch is intentionally used here instead of an
+        // AnimatedSwitcher. This prevents the first learner screen from being
+        // left transparent while authentication and progress synchronization
+        // finish on Flutter Web.
+        final page = KeyedSubtree(
+          key: ValueKey(_currentIndex),
+          child: _pages[_currentIndex],
+        );
+
+        if (useRail) {
+          return Scaffold(
+            body: Row(
               children: [
-                Expanded(
-                  child: _QuickActionCard(
-                    title: 'Prompt Coach',
-                    icon: Icons.edit_note_rounded,
-                    onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => const SandboxScreen(),
+                SafeArea(
+                  child: NavigationRail(
+                    selectedIndex: _currentIndex,
+                    onDestinationSelected: _select,
+                    extended: extendedRail,
+                    minExtendedWidth: 220,
+                    groupAlignment: -1,
+                    leading: Padding(
+                      padding: const EdgeInsets.fromLTRB(
+                        AppSpacing.md,
+                        AppSpacing.xl,
+                        AppSpacing.md,
+                        AppSpacing.section,
+                      ),
+                      child: AppLogo(
+                        size: 42,
+                        showWordmark: extendedRail,
+                        alignment: MainAxisAlignment.start,
                       ),
                     ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _QuickActionCard(
-                    title: 'Real or AI?',
-                    icon: Icons.image_search_rounded,
-                    onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => const GameScreen(),
+                    trailing: Padding(
+                      padding: const EdgeInsets.fromLTRB(
+                        AppSpacing.sm,
+                        AppSpacing.section,
+                        AppSpacing.sm,
+                        AppSpacing.md,
                       ),
+                      child: extendedRail
+                          ? OutlinedButton.icon(
+                              onPressed: auth.isLoading ? null : _signOut,
+                              icon: const Icon(Icons.logout_rounded),
+                              label: const Text('Sign out'),
+                            )
+                          : IconButton.filledTonal(
+                              tooltip: 'Sign out',
+                              onPressed: auth.isLoading ? null : _signOut,
+                              icon: const Icon(Icons.logout_rounded),
+                            ),
                     ),
+                    destinations: _destinations
+                        .map(
+                          (item) => NavigationRailDestination(
+                            icon: Icon(item.icon),
+                            selectedIcon: Icon(item.selectedIcon),
+                            label: Text(item.label),
+                          ),
+                        )
+                        .toList(growable: false),
                   ),
                 ),
+                VerticalDivider(
+                  width: 1,
+                  color: Theme.of(context).colorScheme.outlineVariant,
+                ),
+                Expanded(child: page),
               ],
             ),
-            const SizedBox(height: 28),
-            Text(
-              'Learning Modules',
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.bold,
+          );
+        }
+
+        return Scaffold(
+          body: page,
+          bottomNavigationBar: NavigationBar(
+            selectedIndex: _currentIndex,
+            labelBehavior: veryCompact
+                ? NavigationDestinationLabelBehavior.onlyShowSelected
+                : NavigationDestinationLabelBehavior.alwaysShow,
+            onDestinationSelected: _select,
+            destinations: _destinations
+                .map(
+                  (item) => NavigationDestination(
+                    icon: Icon(item.icon),
+                    selectedIcon: Icon(item.selectedIcon),
+                    label: item.label,
                   ),
-            ),
-            const SizedBox(height: 12),
-            ...modules.map(
-              (module) => Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: ModuleCard(
-                  module: module,
-                  onTap: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => ModuleListScreen(module: module),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
+                )
+                .toList(growable: false),
+          ),
+        );
+      },
     );
   }
 }
 
-class _QuickActionCard extends StatelessWidget {
-  final String title;
+class _Destination {
+  final String label;
   final IconData icon;
-  final VoidCallback onTap;
+  final IconData selectedIcon;
 
-  const _QuickActionCard({
-    required this.title,
+  const _Destination({
+    required this.label,
     required this.icon,
-    required this.onTap,
+    required this.selectedIcon,
   });
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      elevation: 0,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(20),
-        side: BorderSide(color: Colors.grey.shade200),
-      ),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(20),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 16),
-          child: Column(
-            children: [
-              Icon(
-                icon,
-                size: 36,
-                color: Theme.of(context).colorScheme.primary,
-              ),
-              const SizedBox(height: 12),
-              Text(
-                title,
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.titleSmall,
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
 }

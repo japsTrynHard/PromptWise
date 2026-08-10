@@ -1,0 +1,35 @@
+Supabase Dashboard configuration
+================================
+
+1. Authentication > Sign In / Providers > Email
+   - Enable Email provider.
+   - Enable Confirm email.
+
+2. Authentication > URL Configuration
+   - Site URL for local web: http://localhost:3000
+   - Add redirect URL: http://localhost:3000
+   - Add mobile redirect URL: io.promptwise.app://auth-callback/
+   - Add the deployed Flutter web origin when available.
+
+3. Authentication > Emails > SMTP Settings / Custom SMTP
+   - Configure an external SMTP sender before ordinary Gmail OTP testing.
+   - For Gmail development SMTP, follow AUTH_EMAIL_SETUP_GMAIL.md.
+
+4. Authentication > Emails > Templates
+   - Confirm sign up: setup/email_templates/confirm_signup.html
+   - Magic Link / OTP: setup/email_templates/magic_link_otp.html
+   - Reset password: setup/email_templates/reset_password.html
+
+5. SQL Editor
+   Run in order only when needed:
+   - supabase/migrations/20260805_phase3_auth_progress.sql
+   - supabase/migrations/20260805_phase4_dynamic_content.sql
+   - supabase/migrations/20260805_phase4_completion_realtime.sql
+
+6. First administrator
+   Register/create the user, then edit and run:
+   setup/promote_first_admin.sql
+
+7. Security
+   Never place the service_role key, Supabase secret key, or SMTP password in Flutter.
+   Flutter uses only the publishable key.

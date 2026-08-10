@@ -1,0 +1,13 @@
+<!-- android/app/src/main/AndroidManifest.xml -->
+<!-- Add directly under the opening <manifest> tag: -->
+<uses-permission android:name="android.permission.INTERNET" />
+
+<!-- Add inside the existing <activity android:name=".MainActivity" ...>: -->
+<intent-filter>
+    <action android:name="android.intent.action.VIEW" />
+    <category android:name="android.intent.category.DEFAULT" />
+    <category android:name="android.intent.category.BROWSABLE" />
+    <data
+        android:scheme="io.promptwise.app"
+        android:host="auth-callback" />
+</intent-filter>
