@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import '../models/content_item.dart';
 import '../models/game_item.dart';
 import '../models/lesson.dart';
+import '../models/learning_topic.dart';
 import '../models/news_item.dart';
 import '../models/quiz.dart';
 import '../repositories/content_repository.dart';
@@ -335,6 +336,53 @@ class ContentController extends ChangeNotifier {
         .where((item) => item.status == ContentStatus.published)
         .toList(growable: false);
 
+    final lessonItems = published
+        .where((item) => item.type == ContentType.lesson)
+        .toList(growable: false);
+    final moduleItems = published
+        .where((item) => item.type == ContentType.module)
+        .toList(growable: false);
+    final modulesById = <String, ContentItem>{
+      for (final module in moduleItems) module.id: module,
+    };
+
+    LearningTopic? resolveQuizTopic(ContentItem quiz) {
+      if (quiz.adaptiveTopic != null) return quiz.adaptiveTopic;
+
+      ContentItem? linkedLesson;
+      for (final lesson in lessonItems) {
+        if (lesson.quizId == quiz.id) {
+          linkedLesson = lesson;
+          break;
+        }
+      }
+      if (linkedLesson != null) {
+        final module = linkedLesson.parentId == null
+            ? null
+            : modulesById[linkedLesson.parentId!];
+        return linkedLesson.adaptiveTopic ??
+            module?.adaptiveTopic ??
+            inferLearningTopic([
+              linkedLesson.title,
+              linkedLesson.description,
+              linkedLesson.body,
+              module?.title ?? '',
+              module?.description ?? '',
+              quiz.title,
+              quiz.description,
+              quiz.question,
+              quiz.explanation,
+            ]);
+      }
+
+      return inferLearningTopic([
+        quiz.title,
+        quiz.description,
+        quiz.question,
+        quiz.explanation,
+      ]);
+    }
+
     _quizzes = published
         .where((item) => item.type == ContentType.quiz)
         .map(
@@ -346,35 +394,46 @@ class ContentController extends ChangeNotifier {
             options: item.options,
             correctIndex: item.correctIndex ?? 0,
             explanation: item.explanation,
+            topic: resolveQuizTopic(item),
           ),
         )
         .where((quiz) => quiz.isValid)
         .toList(growable: false);
 
-    final lessonItems = published
-        .where((item) => item.type == ContentType.lesson)
-        .toList(growable: false);
-    _modules = published
-        .where((item) => item.type == ContentType.module)
+    _modules = moduleItems
         .map(
-          (module) => Module(
-            id: module.id,
-            title: module.title,
-            description: module.description,
-            icon: module.icon.isEmpty ? 'ai' : module.icon,
-            lessons: lessonItems
-                .where((lesson) => lesson.parentId == module.id)
-                .map(
-                  (lesson) => Lesson(
-                    id: lesson.id,
-                    title: lesson.title,
-                    content: lesson.body,
-                    estimatedMinutes: lesson.estimatedMinutes,
-                    quizId: lesson.quizId ?? '',
-                  ),
-                )
-                .toList(growable: false),
-          ),
+          (module) {
+            final moduleTopic = module.adaptiveTopic ?? inferLearningTopic([
+              module.title,
+              module.description,
+            ]);
+            return Module(
+              id: module.id,
+              title: module.title,
+              description: module.description,
+              icon: module.icon.isEmpty ? 'ai' : module.icon,
+              topic: moduleTopic,
+              lessons: lessonItems
+                  .where((lesson) => lesson.parentId == module.id)
+                  .map(
+                    (lesson) => Lesson(
+                      id: lesson.id,
+                      title: lesson.title,
+                      content: lesson.body,
+                      estimatedMinutes: lesson.estimatedMinutes,
+                      quizId: lesson.quizId ?? '',
+                      learningLevel: lesson.learningLevel,
+                      topic: lesson.adaptiveTopic ?? inferLearningTopic([
+                        lesson.title,
+                        lesson.body,
+                        module.title,
+                        module.description,
+                      ]),
+                    ),
+                  )
+                  .toList(growable: false),
+            );
+          },
         )
         .toList(growable: false);
 
@@ -388,6 +447,9 @@ class ContentController extends ChangeNotifier {
             imagePathB: item.imagePathB,
             isAAI: item.isAAI ?? false,
             explanation: item.explanation,
+            // Verify > Real or AI is verification evidence by design.
+            // Admin/content wording must never redirect it into another topic.
+            topic: LearningTopic.verification,
           ),
         )
         .where(

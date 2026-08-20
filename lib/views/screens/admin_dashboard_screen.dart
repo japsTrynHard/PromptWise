@@ -13,6 +13,7 @@ import '../widgets/app_card.dart';
 import '../widgets/app_logo.dart';
 import '../widgets/page_intro.dart';
 import 'admin_content_management_screen.dart';
+import 'admin_learning_studio_screen.dart';
 
 class AdminDashboardScreen extends StatefulWidget {
   const AdminDashboardScreen({super.key});
@@ -27,6 +28,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   Widget get _currentPage => switch (_index) {
     0 => _OverviewPage(onOpenContent: () => _select(1)),
     1 => const AdminContentManagementScreen(),
+    2 => const AdminLearningStudioScreen(),
     _ => const _UsersPage(),
   };
 
@@ -43,11 +45,13 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   }
 
   Widget _animatedPage() {
-    return AnimatedSwitcher(
-      duration: AppMotion.normal,
-      switchInCurve: AppMotion.standardCurve,
-      switchOutCurve: Curves.easeInCubic,
-      child: KeyedSubtree(key: ValueKey(_index), child: _currentPage),
+    // Admin pages contain large scrollable editors. Rendering two of those
+    // simultaneously during AnimatedSwitcher transitions can produce stale
+    // sliver/render-object assertions on Flutter web. Switch the page
+    // directly; individual controls can still animate safely.
+    return KeyedSubtree(
+      key: ValueKey(_index),
+      child: _currentPage,
     );
   }
 
@@ -158,6 +162,7 @@ class _AdminItems {
   static const items = <_AdminDestination>[
     _AdminDestination('Overview', Icons.dashboard_outlined),
     _AdminDestination('Content', Icons.library_books_outlined),
+    _AdminDestination('Learning Studio', Icons.school_outlined),
     _AdminDestination('Users', Icons.people_outline_rounded),
   ];
 }

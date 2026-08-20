@@ -1,5 +1,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-<uses-permission android:name="android.permission.INTERNET" />
+<uses-permission android:name="android.permission.INTERNET" />flutter pub add http
+flutter pub get
+dart format lib
+flutter analyze
     <application
         android:label="promptwise"
         android:name="${applicationName}"

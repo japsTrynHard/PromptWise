@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../../controllers/content_controller.dart';
 import '../../models/content_item.dart';
+import '../../models/learning_topic.dart';
 import '../../utils/constants.dart';
 import '../widgets/adaptive_layout.dart';
 import '../widgets/app_card.dart';
@@ -563,6 +564,7 @@ class _ContentDataTable extends StatelessWidget {
             DataColumn(label: Text('Title')),
             DataColumn(label: Text('Type')),
             DataColumn(label: Text('Status')),
+            DataColumn(label: Text('Adaptive topic')),
             DataColumn(label: Text('Version')),
             DataColumn(label: Text('Published')),
             DataColumn(label: Text('Review')),
@@ -596,6 +598,7 @@ class _ContentDataTable extends StatelessWidget {
                     ),
                     DataCell(Text(item.type.label)),
                     DataCell(_ContentStatusChip(status: item.status)),
+                    DataCell(Text(item.adaptiveTopic?.label ?? 'Automatic')),
                     DataCell(Text('v${item.version}')),
                     DataCell(Text(_shortDate(item.publicationDate))),
                     DataCell(Text(_shortDate(item.reviewDate))),
@@ -667,7 +670,7 @@ class _ContentCard extends StatelessWidget {
                     ),
                     const SizedBox(height: AppSpacing.xs),
                     Text(
-                      '${item.type.label} · ${item.id}',
+                      '${item.type.label} · ${item.adaptiveTopic?.label ?? 'Automatic topic'} · ${item.id}',
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: Theme.of(context).colorScheme.onSurfaceVariant,
                       ),
@@ -849,6 +852,8 @@ class _ContentEditorDialogState extends State<_ContentEditorDialog> {
   late final TextEditingController _sourceUrl;
   String? _parentId;
   String? _quizId;
+  LearningTopic? _adaptiveTopic;
+  int _learningLevel = 1;
   bool _isAAI = false;
   DateTime? _publicationDate;
   DateTime? _reviewDate;
@@ -881,6 +886,10 @@ class _ContentEditorDialogState extends State<_ContentEditorDialog> {
     _sourceUrl = TextEditingController(text: item?.sourceUrl ?? '');
     _parentId = item?.parentId;
     _quizId = item?.quizId;
+    _adaptiveTopic = item?.type == ContentType.activity
+        ? LearningTopic.verification
+        : item?.adaptiveTopic;
+    _learningLevel = (item?.learningLevel ?? 1).clamp(1, 5);
     _isAAI = item?.isAAI ?? false;
     _publicationDate = item?.publicationDate;
     _reviewDate = item?.reviewDate;
@@ -978,10 +987,16 @@ class _ContentEditorDialogState extends State<_ContentEditorDialog> {
                                 ? null
                                 : (value) {
                                     if (value == null) return;
+                                    final previousType = _type;
                                     setState(() {
                                       _type = value;
                                       _parentId = null;
                                       _quizId = null;
+                                      if (value == ContentType.activity) {
+                                        _adaptiveTopic = LearningTopic.verification;
+                                      } else if (previousType == ContentType.activity) {
+                                        _adaptiveTopic = null;
+                                      }
                                     });
                                   },
                           );
@@ -1049,6 +1064,68 @@ class _ContentEditorDialogState extends State<_ContentEditorDialog> {
                         validator: _required('Enter a title.'),
                       ),
                       const SizedBox(height: AppSpacing.md),
+                      DropdownButtonFormField<LearningTopic?>(
+                        initialValue: _adaptiveTopic,
+                        decoration: InputDecoration(
+                          labelText: 'Adaptive learning topic',
+                          helperText: _type == ContentType.activity
+                              ? 'Verification activities always contribute to Verification mastery.'
+                              : _type == ContentType.quiz
+                                  ? 'Required for stable mastery tracking and recommendations.'
+                                  : 'Used for mastery tracking and personalized recommendations. Automatic inference is allowed for modules and lessons.',
+                        ),
+                        items: [
+                          if (_type != ContentType.quiz &&
+                              _type != ContentType.activity)
+                            const DropdownMenuItem<LearningTopic?>(
+                              value: null,
+                              child: Text('Automatic'),
+                            ),
+                          ...LearningTopic.values.map(
+                            (topic) => DropdownMenuItem<LearningTopic?>(
+                              value: topic,
+                              child: Text(topic.label),
+                            ),
+                          ),
+                        ],
+                        validator: (_) {
+                          if ((_type == ContentType.quiz ||
+                                  _type == ContentType.activity) &&
+                              _adaptiveTopic == null) {
+                            return 'Choose an adaptive learning topic.';
+                          }
+                          return null;
+                        },
+                        onChanged: _type == ContentType.activity
+                            ? null
+                            : (value) => setState(() => _adaptiveTopic = value),
+                      ),
+                      const SizedBox(height: AppSpacing.md),
+                      if (_type == ContentType.module ||
+                          _type == ContentType.lesson ||
+                          _type == ContentType.quiz) ...[
+                        DropdownButtonFormField<int>(
+                          initialValue: _learningLevel,
+                          decoration: const InputDecoration(
+                            labelText: 'Learning challenge level',
+                            helperText:
+                                'Controls progression: 1 Foundation, 2 Developing, 3 Proficient, 4 Advanced, 5 Expert.',
+                          ),
+                          items: const [
+                            DropdownMenuItem(value: 1, child: Text('Foundation')),
+                            DropdownMenuItem(value: 2, child: Text('Developing')),
+                            DropdownMenuItem(value: 3, child: Text('Proficient')),
+                            DropdownMenuItem(value: 4, child: Text('Advanced')),
+                            DropdownMenuItem(value: 5, child: Text('Expert')),
+                          ],
+                          onChanged: (value) {
+                            if (value != null) {
+                              setState(() => _learningLevel = value);
+                            }
+                          },
+                        ),
+                        const SizedBox(height: AppSpacing.md),
+                      ],
                       ..._typeSpecificFields(modules, quizzes),
                       const SizedBox(height: AppSpacing.lg),
                       Text(
@@ -1414,6 +1491,8 @@ class _ContentEditorDialogState extends State<_ContentEditorDialog> {
         imagePathB: _type == ContentType.activity ? _imageB.text.trim() : '',
         isAAI: _type == ContentType.activity ? _isAAI : null,
         sortOrder: int.parse(_sortOrder.text.trim()),
+        learningLevel: _learningLevel,
+        adaptiveTopic: _adaptiveTopic,
         status: _status,
         version: existing?.version ?? 1,
         sourceUrl: _sourceUrl.text.trim().isEmpty

@@ -1,0 +1,7 @@
+# PromptWise Supabase local/function configuration.
+# Existing functions remain unchanged. Phase 7 content automation is invoked
+# by the authenticated Admin Web client for manual checks and can also accept
+# a protected scheduled trigger handled inside the function.
+
+[functions.content-automation]
+verify_jwt = false

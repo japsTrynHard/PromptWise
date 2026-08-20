@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../controllers/adaptive_learning_controller.dart';
 import '../../controllers/content_controller.dart';
 import '../../controllers/progress_controller.dart';
 import '../../models/lesson.dart';
@@ -37,7 +38,19 @@ class _LearnScreenState extends State<LearnScreen> {
   Widget build(BuildContext context) {
     final content = context.watch<ContentController>();
     final progress = context.watch<ProgressController>();
-    final modules = content.modules;
+    final adaptive = context.watch<AdaptiveLearningController>();
+    final recommendedTopic = adaptive.recommendedTopic;
+    final modules = List.of(content.modules)
+      ..sort((a, b) {
+        final aRecommended = recommendedTopic != null &&
+            (a.topic == recommendedTopic ||
+                a.lessons.any((lesson) => lesson.topic == recommendedTopic));
+        final bRecommended = recommendedTopic != null &&
+            (b.topic == recommendedTopic ||
+                b.lessons.any((lesson) => lesson.topic == recommendedTopic));
+        if (aRecommended != bRecommended) return aRecommended ? -1 : 1;
+        return a.title.compareTo(b.title);
+      });
     final completedIds = progress.progress.completedLessonIds.toSet();
 
     final selectedModuleId =

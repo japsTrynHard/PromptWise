@@ -5,6 +5,8 @@ import '../models/awareness_filter.dart';
 import '../models/lesson.dart';
 import '../models/quiz.dart';
 import '../utils/constants.dart';
+import '../views/screens/adaptive_knowledge_check_screen.dart';
+import '../views/screens/adaptive_learning_screen.dart';
 import '../views/screens/admin_dashboard_screen.dart';
 import '../views/screens/auth/auth_gate_screen.dart';
 import '../views/screens/auth/forgot_password_screen.dart';
@@ -13,6 +15,7 @@ import '../views/screens/auth/register_screen.dart';
 import '../views/screens/auth/reset_password_screen.dart';
 import '../views/screens/auth/verify_email_screen.dart';
 import '../views/screens/dashboard_screen.dart';
+import '../views/screens/diagnostic_assessment_screen.dart';
 import '../views/screens/game_screen.dart';
 import '../views/screens/lesson_detail_screen.dart';
 import '../views/screens/module_list_screen.dart';
@@ -39,6 +42,9 @@ class AppRoutes {
   static const String sandbox = '/sandbox';
   static const String game = '/real-or-ai';
   static const String awareness = '/awareness';
+  static const String adaptiveLearning = '/adaptive-learning';
+  static const String adaptiveKnowledgeCheck = '/adaptive-knowledge-check';
+  static const String diagnostic = '/diagnostic';
   static const String admin = '/admin';
 
   static Route<dynamic> generateRoute(RouteSettings settings) {
@@ -81,6 +87,28 @@ class AppRoutes {
           AuthenticatedRoute(
             child: NewsScreen(filter: value is AwarenessFilter ? value : null),
           ),
+        );
+      case adaptiveLearning:
+        return _page(
+          settings,
+          const AuthenticatedRoute(child: AdaptiveLearningScreen()),
+        );
+      case adaptiveKnowledgeCheck:
+        final value = settings.arguments;
+        return _page(
+          settings,
+          AuthenticatedRoute(
+            child: AdaptiveKnowledgeCheckScreen(
+              args: value is AdaptiveKnowledgeCheckArgs
+                  ? value
+                  : const AdaptiveKnowledgeCheckArgs(),
+            ),
+          ),
+        );
+      case diagnostic:
+        return _page(
+          settings,
+          const AuthenticatedRoute(child: DiagnosticAssessmentScreen()),
         );
       case admin:
         return _page(

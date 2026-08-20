@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../controllers/adaptive_learning_controller.dart';
 import '../../controllers/auth_controller.dart';
 import '../../controllers/content_controller.dart';
 import '../../controllers/progress_controller.dart';
+import '../../models/learning_topic.dart';
 import '../../models/lesson.dart';
 import '../../routes/app_routes.dart';
 import '../../utils/constants.dart';
@@ -24,13 +26,19 @@ class HomeScreen extends StatelessWidget {
     final progressController = context.watch<ProgressController>();
     final progress = progressController.progress;
     final content = context.watch<ContentController>();
+    final adaptive = context.watch<AdaptiveLearningController>();
     final modules = content.modules;
     final awareness = content.awarenessItems;
     final nextLesson = _findNextLesson(
       modules,
       progress.completedLessonIds.toSet(),
+      preferredTopic: adaptive.recommendedTopic,
     );
-    final recommendation = _buildRecommendation(content, progressController);
+    final recommendation = _buildRecommendation(
+      content,
+      progressController,
+      adaptive,
+    );
 
     return AdaptiveBody(
       child: SingleChildScrollView(
@@ -78,6 +86,13 @@ class HomeScreen extends StatelessWidget {
                   completed: progress.completedLessons,
                   total: progress.totalLessons,
                   level: progress.knowledgeLevel,
+                  adaptiveMastery: adaptive.overallMastery,
+                  diagnosticCompleted: adaptive.diagnosticCompleted,
+                  weakestTopic: adaptive.weakestTopic?.label,
+                  onTap: () => Navigator.pushNamed(
+                    context,
+                    AppRoutes.adaptiveLearning,
+                  ),
                 );
                 final actionCard = _RecommendedActionCard(
                   recommendation: recommendation,
@@ -138,9 +153,130 @@ class HomeScreen extends StatelessWidget {
   _Recommendation _buildRecommendation(
     ContentController content,
     ProgressController progress,
+    AdaptiveLearningController adaptive,
   ) {
+    if (!adaptive.diagnosticCompleted) {
+      return const _Recommendation(
+        title: 'Take your diagnostic assessment',
+        description:
+            'Answer five short questions so PromptWise can identify your starting strengths and weak areas.',
+        actionLabel: 'Start diagnostic',
+        icon: Icons.assignment_outlined,
+        route: AppRoutes.diagnostic,
+      );
+    }
+
+    final topic = adaptive.recommendedTopic;
+    if (topic != null) {
+      final dueForReview = adaptive.masteryFor(topic).isDueForReview;
+
+      if (dueForReview) {
+        for (final quiz in content.quizzes) {
+          if (quiz.topic == topic) {
+            return _Recommendation(
+              title: 'Review ${topic.label}',
+              description:
+                  '${adaptive.recommendationReason} This knowledge check can add new review evidence.',
+              actionLabel: 'Open review check',
+              icon: Icons.quiz_outlined,
+              route: AppRoutes.quiz,
+              arguments: quiz,
+            );
+          }
+        }
+        if (topic == LearningTopic.verification && content.activities.isNotEmpty) {
+          return _Recommendation(
+            title: 'Review verification',
+            description:
+                '${adaptive.recommendationReason} Use a Real or AI round for review evidence.',
+            actionLabel: 'Open verification activity',
+            icon: Icons.image_search_outlined,
+            route: AppRoutes.game,
+          );
+        }
+      }
+
+      for (final module in content.modules) {
+        for (final lesson in module.lessons) {
+          if (lesson.topic != topic || !progress.isLessonCompleted(lesson.id)) {
+            continue;
+          }
+          final linkedQuiz = content.findQuizById(lesson.quizId);
+          if (linkedQuiz != null &&
+              progress.bestScoreForQuiz(linkedQuiz.id) < 100 &&
+              adaptive.canCountEvidenceNow(
+                itemId: linkedQuiz.id,
+                topic: topic,
+              )) {
+            return _Recommendation(
+              title: 'Check ${topic.label}',
+              description:
+                  '${adaptive.recommendationReason} You completed the lesson; continue with its knowledge check.',
+              actionLabel: 'Open linked check',
+              icon: Icons.quiz_outlined,
+              route: AppRoutes.quiz,
+              arguments: linkedQuiz,
+            );
+          }
+        }
+      }
+
+      for (final module in content.modules) {
+        for (final lesson in module.lessons) {
+          if (lesson.topic == topic && !progress.isLessonCompleted(lesson.id)) {
+            return _Recommendation(
+              title: 'Strengthen ${topic.label}',
+              description:
+                  '${adaptive.recommendationReason} Continue with ${lesson.title}. Mastery changes after the related knowledge check.',
+              actionLabel: 'Open recommended lesson',
+              icon: Icons.route_outlined,
+              route: AppRoutes.lesson,
+              arguments: lesson,
+            );
+          }
+        }
+      }
+
+      for (final quiz in content.quizzes) {
+        if (quiz.topic == topic &&
+            progress.bestScoreForQuiz(quiz.id) < 100 &&
+            adaptive.canCountEvidenceNow(itemId: quiz.id, topic: topic)) {
+          return _Recommendation(
+            title: 'Practice ${topic.label}',
+            description:
+                '${adaptive.recommendationReason} This knowledge check matches that topic.',
+            actionLabel: 'Open recommended check',
+            icon: Icons.quiz_outlined,
+            route: AppRoutes.quiz,
+            arguments: quiz,
+          );
+        }
+      }
+
+      if (topic == LearningTopic.verification &&
+          content.activities.any(
+            (activity) => adaptive.canCountEvidenceNow(
+              itemId: activity.id,
+              topic: LearningTopic.verification,
+              attemptType: 'verification_activity',
+            ),
+          )) {
+        return _Recommendation(
+          title: 'Practice verification',
+          description:
+              '${adaptive.recommendationReason} Use a Real or AI round to practice evidence-based verification.',
+          actionLabel: 'Open verification activity',
+          icon: Icons.image_search_outlined,
+          route: AppRoutes.game,
+        );
+      }
+    }
+
     for (final quiz in content.quizzes) {
-      if (progress.bestScoreForQuiz(quiz.id) < 100) {
+      final quizTopic = quiz.topic;
+      final canUseNow = quizTopic == null ||
+          adaptive.canCountEvidenceNow(itemId: quiz.id, topic: quizTopic);
+      if (progress.bestScoreForQuiz(quiz.id) < 100 && canUseNow) {
         return _Recommendation(
           title: 'Complete ${quiz.displayTitle}',
           description:
@@ -153,7 +289,13 @@ class HomeScreen extends StatelessWidget {
       }
     }
 
-    if (content.activities.isNotEmpty &&
+    if (content.activities.any(
+          (activity) => adaptive.canCountEvidenceNow(
+            itemId: activity.id,
+            topic: LearningTopic.verification,
+            attemptType: 'verification_activity',
+          ),
+        ) &&
         !progress.hasBadge(ProgressBadges.aiDetective)) {
       return const _Recommendation(
         title: 'Try a verification activity',
@@ -166,12 +308,12 @@ class HomeScreen extends StatelessWidget {
     }
 
     return const _Recommendation(
-      title: 'Improve a prompt with the Coach',
+      title: 'Review your adaptive learning path',
       description:
-          'Practice writing a clear prompt, review guided feedback, and revise it using your own words.',
-      actionLabel: 'Open Prompt Coach',
-      icon: Icons.edit_note_rounded,
-      route: AppRoutes.sandbox,
+          'See your topic mastery, due reviews, and the next area PromptWise recommends.',
+      actionLabel: 'View learning path',
+      icon: Icons.route_outlined,
+      route: AppRoutes.adaptiveLearning,
     );
   }
 
@@ -212,8 +354,19 @@ class HomeScreen extends StatelessWidget {
 
   Lesson? _findNextLesson(
     List<Module> modules,
-    Set<String> completedLessonIds,
-  ) {
+    Set<String> completedLessonIds, {
+    LearningTopic? preferredTopic,
+  }) {
+    if (preferredTopic != null) {
+      for (final module in modules) {
+        for (final lesson in module.lessons) {
+          if (lesson.topic == preferredTopic &&
+              !completedLessonIds.contains(lesson.id)) {
+            return lesson;
+          }
+        }
+      }
+    }
     for (final module in modules) {
       for (final lesson in module.lessons) {
         if (!completedLessonIds.contains(lesson.id)) return lesson;
@@ -328,11 +481,19 @@ class _MasteryCard extends StatelessWidget {
   final int completed;
   final int total;
   final String level;
+  final int adaptiveMastery;
+  final bool diagnosticCompleted;
+  final String? weakestTopic;
+  final VoidCallback onTap;
 
   const _MasteryCard({
     required this.completed,
     required this.total,
     required this.level,
+    required this.adaptiveMastery,
+    required this.diagnosticCompleted,
+    required this.weakestTopic,
+    required this.onTap,
   });
 
   @override
@@ -358,6 +519,21 @@ class _MasteryCard extends StatelessWidget {
               Chip(
                 avatar: const Icon(Icons.school_outlined, size: 18),
                 label: Text(level),
+              ),
+              const SizedBox(height: AppSpacing.sm),
+              Text(
+                diagnosticCompleted
+                    ? 'Adaptive mastery: $adaptiveMastery%${weakestTopic == null ? '' : ' · Focus: $weakestTopic'}'
+                    : 'Take the diagnostic to activate personalized mastery tracking.',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: AppSpacing.md),
+              TextButton.icon(
+                onPressed: onTap,
+                icon: const Icon(Icons.route_outlined),
+                label: const Text('View adaptive learning'),
               ),
             ],
           );

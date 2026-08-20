@@ -1,3 +1,5 @@
+import 'learning_topic.dart';
+
 class GameRound {
   final String id;
   final String title;
@@ -5,6 +7,7 @@ class GameRound {
   final String imagePathB;
   final bool isAAI;
   final String explanation;
+  final LearningTopic topic;
 
   const GameRound({
     required this.id,
@@ -13,5 +16,6 @@ class GameRound {
     required this.imagePathB,
     required this.isAAI,
     required this.explanation,
+    this.topic = LearningTopic.verification,
   });
 }

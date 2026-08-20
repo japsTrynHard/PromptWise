@@ -1,3 +1,5 @@
+import 'learning_topic.dart';
+
 enum ContentType { module, lesson, quiz, activity, awareness }
 
 enum ContentStatus { draft, published, archived }
@@ -56,6 +58,8 @@ class ContentItem {
   final String imagePathB;
   final bool? isAAI;
   final int sortOrder;
+  final int learningLevel;
+  final LearningTopic? adaptiveTopic;
   final ContentStatus status;
   final int version;
   final String? sourceUrl;
@@ -82,6 +86,8 @@ class ContentItem {
     this.imagePathB = '',
     this.isAAI,
     this.sortOrder = 0,
+    this.learningLevel = 1,
+    this.adaptiveTopic,
     this.status = ContentStatus.draft,
     this.version = 1,
     this.sourceUrl,
@@ -115,6 +121,8 @@ class ContentItem {
       imagePathB: map['image_path_b']?.toString() ?? '',
       isAAI: map['is_a_ai'] as bool?,
       sortOrder: _asInt(map['sort_order']),
+      learningLevel: _asInt(map['learning_level'], fallback: 1).clamp(1, 5),
+      adaptiveTopic: LearningTopicX.fromId(map['adaptive_topic']?.toString()),
       status: ContentStatusX.fromDatabase(map['status']?.toString()),
       version: _asInt(map['version'], fallback: 1),
       sourceUrl: _nullableString(map['source_url']),
@@ -147,6 +155,8 @@ class ContentItem {
       'image_path_b': imagePathB.trim(),
       'is_a_ai': isAAI,
       'sort_order': sortOrder,
+      'learning_level': learningLevel.clamp(1, 5),
+      'adaptive_topic': adaptiveTopic?.id,
       'status': status.databaseValue,
       'source_url': _nullIfEmpty(sourceUrl),
       'publication_date': _dateOnly(publicationDate),
@@ -176,6 +186,9 @@ class ContentItem {
     bool? isAAI,
     bool clearIsAAI = false,
     int? sortOrder,
+    int? learningLevel,
+    LearningTopic? adaptiveTopic,
+    bool clearAdaptiveTopic = false,
     ContentStatus? status,
     int? version,
     String? sourceUrl,
@@ -207,6 +220,8 @@ class ContentItem {
       imagePathB: imagePathB ?? this.imagePathB,
       isAAI: clearIsAAI ? null : isAAI ?? this.isAAI,
       sortOrder: sortOrder ?? this.sortOrder,
+      learningLevel: learningLevel ?? this.learningLevel,
+      adaptiveTopic: clearAdaptiveTopic ? null : adaptiveTopic ?? this.adaptiveTopic,
       status: status ?? this.status,
       version: version ?? this.version,
       sourceUrl: clearSourceUrl ? null : sourceUrl ?? this.sourceUrl,

@@ -1,30 +1,67 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../controllers/adaptive_learning_controller.dart';
 import '../../controllers/content_controller.dart';
+import '../../controllers/learning_progression_controller.dart';
 import '../../controllers/progress_controller.dart';
+import '../../models/learning_progression.dart';
+import '../../models/learning_topic.dart';
 import '../../routes/app_routes.dart';
 import '../../utils/constants.dart';
+import 'adaptive_knowledge_check_screen.dart';
 import '../widgets/adaptive_layout.dart';
 import '../widgets/app_card.dart';
 import '../widgets/fade_slide_in.dart';
 import '../widgets/live_content_banner.dart';
 import '../widgets/page_intro.dart';
 import '../widgets/section_header.dart';
-import '../widgets/state_message.dart';
 
 class PracticeScreen extends StatelessWidget {
   const PracticeScreen({super.key});
 
+  Future<void> _refresh(BuildContext context) async {
+    final content = context.read<ContentController>();
+    final progress = context.read<ProgressController>();
+    final adaptive = context.read<AdaptiveLearningController>();
+    final progression = context.read<LearningProgressionController>();
+
+    await content.refresh();
+    await progress.refreshFromCloud();
+    await adaptive.refreshFromCloud();
+    await adaptive.synchronizeExistingProgress(
+      quizzes: content.quizzes,
+      bestScores: progress.progress.quizBestScores,
+    );
+    await progression.refresh();
+  }
+
+  void _start(
+    BuildContext context, {
+    LearningTopic? focusTopic,
+    int questionCount = 10,
+    String mode = 'adaptive',
+  }) {
+    Navigator.pushNamed(
+      context,
+      AppRoutes.adaptiveKnowledgeCheck,
+      arguments: AdaptiveKnowledgeCheckArgs(
+        focusTopic: focusTopic,
+        questionCount: questionCount,
+        mode: mode,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final content = context.watch<ContentController>();
-    final progress = context.watch<ProgressController>();
-    final quizzes = content.quizzes;
+    final adaptive = context.watch<AdaptiveLearningController>();
+    final progression = context.watch<LearningProgressionController>();
+    final focus = adaptive.recommendedTopic ?? adaptive.weakestTopic;
 
     return AdaptiveBody(
       child: RefreshIndicator(
-        onRefresh: content.refresh,
+        onRefresh: () => _refresh(context),
         child: CustomScrollView(
           physics: const AlwaysScrollableScrollPhysics(),
           slivers: [
@@ -35,7 +72,7 @@ class PracticeScreen extends StatelessWidget {
                   const PageIntro(
                     title: 'Practice',
                     description:
-                        'Use the Prompt Coach and knowledge checks to strengthen your own reasoning.',
+                        'Build skill through adaptive knowledge checks that change topic mix and difficulty as your mastery grows.',
                   ),
                   const SizedBox(height: AppSpacing.lg),
                   const LiveContentBanner(),
@@ -47,62 +84,336 @@ class PracticeScreen extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: AppSpacing.section),
-                  SectionHeader(
-                    title: 'Knowledge checks',
+                  _AdaptiveKnowledgeCheckHero(
+                    overallRank: progression.overallRankLabel,
+                    focusTopic: focus,
+                    dueCount: adaptive.dueReviews.length,
+                    loading: progression.isStartingSession,
+                    onStart: () => _start(
+                      context,
+                      focusTopic: focus,
+                      questionCount: 10,
+                      mode: adaptive.dueReviews.isNotEmpty
+                          ? 'review'
+                          : 'adaptive',
+                    ),
+                  ),
+                  if (progression.errorMessage != null) ...[
+                    const SizedBox(height: AppSpacing.md),
+                    AppCard(
+                      backgroundColor: Theme.of(context)
+                          .colorScheme
+                          .errorContainer
+                          .withValues(alpha: 0.45),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Icon(
+                            Icons.info_outline_rounded,
+                            color: Theme.of(context).colorScheme.error,
+                          ),
+                          const SizedBox(width: AppSpacing.md),
+                          Expanded(child: Text(progression.errorMessage!)),
+                        ],
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: AppSpacing.section),
+                  const SectionHeader(
+                    title: 'Focused practice',
                     subtitle:
-                        '${quizzes.length} knowledge check${quizzes.length == 1 ? '' : 's'} available. Your best results are saved to your account.',
+                        'Choose one competency when you want extra challenge in a specific area. Questions still adapt to your current rank.',
                   ),
                   const SizedBox(height: AppSpacing.md),
+                  ...LearningTopic.values.map(
+                    (topic) => Padding(
+                      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+                      child: _TopicPracticeCard(
+                        topic: topic,
+                        mastery: adaptive.masteryFor(topic).mastery,
+                        rank: progression.rankFor(topic),
+                        recommended: topic == focus,
+                        onTap: () => _start(
+                          context,
+                          focusTopic: topic,
+                          questionCount: 8,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.section),
+                  const _HowItAdaptsCard(),
                 ]),
               ),
             ),
-            if (content.isLoading && !content.hasLoaded)
-              const SliverFillRemaining(
-                hasScrollBody: false,
-                child: Center(child: CircularProgressIndicator()),
-              )
-            else if (quizzes.isEmpty)
-              const SliverFillRemaining(
-                hasScrollBody: false,
-                child: StateMessage.empty(
-                  title: 'No knowledge checks available',
-                  message:
-                      'New knowledge checks will appear here when available.',
-                ),
-              )
-            else
-              SliverPadding(
-                padding: AdaptiveLayout.pageInsets(context, top: 0),
-                sliver: SliverList(
-                  delegate: SliverChildBuilderDelegate((context, index) {
-                    final quiz = quizzes[index];
-                    return Padding(
-                      padding: EdgeInsets.only(
-                        bottom: index == quizzes.length - 1 ? 0 : AppSpacing.md,
-                      ),
-                      child: FadeSlideIn(
-                        order: index + 1,
-                        child: _QuizPracticeCard(
-                          index: index + 1,
-                          title: quiz.displayTitle,
-                          description: quiz.description.isEmpty
-                              ? 'Answer the question and review the explanation.'
-                              : quiz.description,
-                          bestScore: progress.bestScoreForQuiz(quiz.id),
-                          onTap: () => Navigator.pushNamed(
-                            context,
-                            AppRoutes.quiz,
-                            arguments: quiz,
-                          ),
-                        ),
-                      ),
-                    );
-                  }, childCount: quizzes.length),
-                ),
-              ),
           ],
         ),
       ),
+    );
+  }
+}
+
+class _AdaptiveKnowledgeCheckHero extends StatelessWidget {
+  final String overallRank;
+  final LearningTopic? focusTopic;
+  final int dueCount;
+  final bool loading;
+  final VoidCallback onStart;
+
+  const _AdaptiveKnowledgeCheckHero({
+    required this.overallRank,
+    required this.focusTopic,
+    required this.dueCount,
+    required this.loading,
+    required this.onStart,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return AppCard(
+      padding: const EdgeInsets.all(AppSpacing.xxl),
+      backgroundColor: Theme.of(context).colorScheme.primaryContainer.withValues(
+            alpha: Theme.of(context).brightness == Brightness.dark ? 0.22 : 0.5,
+          ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final content = Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 54,
+                    height: 54,
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.primary,
+                      borderRadius: BorderRadius.circular(AppRadius.md),
+                    ),
+                    child: const Icon(
+                      Icons.psychology_alt_outlined,
+                      color: Colors.white,
+                    ),
+                  ),
+                  const SizedBox(width: AppSpacing.md),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Adaptive Knowledge Check',
+                          style: Theme.of(context).textTheme.headlineSmall,
+                        ),
+                        const SizedBox(height: AppSpacing.xs),
+                        Text(
+                          'Current AI literacy rank: $overallRank',
+                          style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                                color: Theme.of(context).colorScheme.primary,
+                              ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: AppSpacing.lg),
+              Text(
+                focusTopic == null
+                    ? 'Complete a mixed set of questions across your AI-literacy competencies.'
+                    : 'PromptWise will place extra weight on ${focusTopic!.label} while still checking other competencies.',
+                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                      height: 1.5,
+                    ),
+              ),
+              const SizedBox(height: AppSpacing.md),
+              Wrap(
+                spacing: AppSpacing.sm,
+                runSpacing: AppSpacing.sm,
+                children: [
+                  const Chip(label: Text('10 adaptive questions')),
+                  const Chip(label: Text('5 difficulty levels')),
+                  Chip(
+                    label: Text(
+                      dueCount == 0
+                          ? 'No overdue reviews'
+                          : '$dueCount review${dueCount == 1 ? '' : 's'} due',
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          );
+
+          final button = FilledButton.icon(
+            onPressed: loading ? null : onStart,
+            icon: loading
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  )
+                : const Icon(Icons.play_arrow_rounded),
+            label: Text(loading ? 'Preparing...' : 'Start Knowledge Check'),
+          );
+
+          if (constraints.maxWidth >= 680) {
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Expanded(child: content),
+                const SizedBox(width: AppSpacing.xxl),
+                button,
+              ],
+            );
+          }
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              content,
+              const SizedBox(height: AppSpacing.xl),
+              button,
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _TopicPracticeCard extends StatelessWidget {
+  final LearningTopic topic;
+  final int mastery;
+  final LearnerTopicRank rank;
+  final bool recommended;
+  final VoidCallback onTap;
+
+  const _TopicPracticeCard({
+    required this.topic,
+    required this.mastery,
+    required this.rank,
+    required this.recommended,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return AppCard(
+      onTap: onTap,
+      child: Row(
+        children: [
+          SizedBox(
+            width: 48,
+            height: 48,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                CircularProgressIndicator(
+                  value: mastery / 100,
+                  strokeWidth: 5,
+                  backgroundColor:
+                      Theme.of(context).colorScheme.surfaceContainerHighest,
+                ),
+                Text(
+                  '$mastery',
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: AppSpacing.lg),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        topic.label,
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                    ),
+                    if (recommended)
+                      const Icon(Icons.auto_awesome_rounded, size: 20),
+                  ],
+                ),
+                const SizedBox(height: AppSpacing.xs),
+                Text(
+                  '${rank.displayLabel} · ${rank.objectiveCoverage}% objective coverage',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: AppSpacing.md),
+          const Icon(Icons.arrow_forward_ios_rounded, size: 16),
+        ],
+      ),
+    );
+  }
+}
+
+class _HowItAdaptsCard extends StatelessWidget {
+  const _HowItAdaptsCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return AppCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('How the challenge changes',
+              style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: AppSpacing.md),
+          const _RuleLine(
+            icon: Icons.trending_up_rounded,
+            text:
+                'Stronger performance unlocks harder application and evaluation questions.',
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          const _RuleLine(
+            icon: Icons.track_changes_rounded,
+            text:
+                'Weak topics receive more coverage without letting one topic dominate the whole session.',
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          const _RuleLine(
+            icon: Icons.repeat_rounded,
+            text:
+                'Unseen questions are preferred; repeated questions only become new mastery evidence when review rules allow it.',
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _RuleLine extends StatelessWidget {
+  final IconData icon;
+  final String text;
+
+  const _RuleLine({required this.icon, required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, size: 20, color: Theme.of(context).colorScheme.primary),
+        const SizedBox(width: AppSpacing.md),
+        Expanded(
+          child: Text(
+            text,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(height: 1.45),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -119,9 +430,8 @@ class _PromptCoachHero extends StatelessWidget {
     return AppCard(
       onTap: onTap,
       padding: const EdgeInsets.all(AppSpacing.xxl),
-      backgroundColor: isDark
-          ? const Color(0xFF151D3A)
-          : const Color(0xFFF0F0FF),
+      backgroundColor:
+          isDark ? const Color(0xFF151D3A) : const Color(0xFFF0F0FF),
       child: LayoutBuilder(
         builder: (context, constraints) {
           final information = Column(
@@ -139,27 +449,15 @@ class _PromptCoachHero extends StatelessWidget {
                 child: const Icon(Icons.edit_note_rounded, color: Colors.white),
               ),
               const SizedBox(height: AppSpacing.lg),
-              Text(
-                'Prompt Coach',
-                style: Theme.of(context).textTheme.headlineSmall,
-              ),
+              Text('Prompt Coach',
+                  style: Theme.of(context).textTheme.headlineSmall),
               const SizedBox(height: AppSpacing.sm),
               Text(
                 'Write a prompt, receive guided feedback, and revise it using your own words.',
                 style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  height: 1.5,
-                ),
-              ),
-              const SizedBox(height: AppSpacing.lg),
-              const Wrap(
-                spacing: AppSpacing.sm,
-                runSpacing: AppSpacing.sm,
-                children: [
-                  Chip(label: Text('No automatic rewriting')),
-                  Chip(label: Text('Privacy reminders')),
-                  Chip(label: Text('Revision guidance')),
-                ],
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      height: 1.5,
+                    ),
               ),
             ],
           );
@@ -190,68 +488,6 @@ class _PromptCoachHero extends StatelessWidget {
             ],
           );
         },
-      ),
-    );
-  }
-}
-
-class _QuizPracticeCard extends StatelessWidget {
-  final int index;
-  final String title;
-  final String description;
-  final int bestScore;
-  final VoidCallback onTap;
-
-  const _QuizPracticeCard({
-    required this.index,
-    required this.title,
-    required this.description,
-    required this.bestScore,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return AppCard(
-      onTap: onTap,
-      child: Row(
-        children: [
-          CircleAvatar(
-            backgroundColor: Theme.of(context).colorScheme.primaryContainer,
-            foregroundColor: Theme.of(context).colorScheme.primary,
-            child: Text(
-              '$index',
-              style: const TextStyle(fontWeight: FontWeight.w800),
-            ),
-          ),
-          const SizedBox(width: AppSpacing.lg),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(title, style: Theme.of(context).textTheme.titleMedium),
-                const SizedBox(height: AppSpacing.xs),
-                Text(
-                  description,
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-                ),
-                const SizedBox(height: AppSpacing.sm),
-                Text(
-                  bestScore > 0 ? 'Best score: $bestScore%' : 'Not attempted',
-                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                    color: bestScore == 100
-                        ? AppColors.success
-                        : Theme.of(context).colorScheme.primary,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: AppSpacing.sm),
-          const Icon(Icons.chevron_right_rounded),
-        ],
       ),
     );
   }

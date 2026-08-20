@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../controllers/adaptive_learning_controller.dart';
 import '../../controllers/content_controller.dart';
 import '../../controllers/progress_controller.dart';
 import '../../models/game_item.dart';
+import '../../models/learning_topic.dart';
 import '../../utils/constants.dart';
 import '../widgets/adaptive_layout.dart';
 import '../widgets/app_card.dart';
@@ -22,9 +24,35 @@ class _GameScreenState extends State<GameScreen> {
   bool _answered = false;
   bool? _choseA;
   int _score = 0;
+  bool _masteryCounted = false;
+  List<GameRound> _sessionRounds = const [];
+  String _roundSignature = '';
 
-  List<GameRound> get _rounds => context.read<ContentController>().activities;
+  List<GameRound> get _rounds => _sessionRounds;
   GameRound get _current => _rounds[_currentRound];
+
+  void _prepareSessionRounds(List<GameRound> source) {
+    final signature = source.map((round) => round.id).join('|');
+    if (signature == _roundSignature) return;
+
+    final adaptive = context.read<AdaptiveLearningController>();
+    final eligible = <GameRound>[];
+    final waiting = <GameRound>[];
+    for (final round in source) {
+      final canCount = adaptive.canCountEvidenceNow(
+        itemId: round.id,
+        topic: LearningTopic.verification,
+        attemptType: 'verification_activity',
+      );
+      (canCount ? eligible : waiting).add(round);
+    }
+    _sessionRounds = [...eligible, ...waiting];
+    _roundSignature = signature;
+    _currentRound = 0;
+    _answered = false;
+    _choseA = null;
+    _masteryCounted = false;
+  }
 
   Future<void> _selectImage(bool isA) async {
     if (_answered || _rounds.isEmpty) return;
@@ -36,6 +64,17 @@ class _GameScreenState extends State<GameScreen> {
       if (isCorrect) _score += 100;
     });
 
+    final masteryCounted = await context
+        .read<AdaptiveLearningController>()
+        .recordPracticeAttempt(
+          itemId: _current.id,
+          topic: LearningTopic.verification,
+          isCorrect: isCorrect,
+          attemptType: 'verification_activity',
+        );
+
+    if (!mounted) return;
+    setState(() => _masteryCounted = masteryCounted);
     if (isCorrect) {
       await context.read<ProgressController>().addGameBadge();
     }
@@ -47,6 +86,7 @@ class _GameScreenState extends State<GameScreen> {
         _currentRound++;
         _answered = false;
         _choseA = null;
+        _masteryCounted = false;
       });
       return;
     }
@@ -76,11 +116,14 @@ class _GameScreenState extends State<GameScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final rounds = context.watch<ContentController>().activities;
+    final sourceRounds = context.watch<ContentController>().activities;
+    _prepareSessionRounds(sourceRounds);
+    final rounds = _sessionRounds;
     if (_currentRound >= rounds.length && rounds.isNotEmpty) {
       _currentRound = 0;
       _answered = false;
       _choseA = null;
+      _masteryCounted = false;
     }
 
     return Scaffold(
@@ -240,6 +283,20 @@ class _GameScreenState extends State<GameScreen> {
                                               .textTheme
                                               .bodyMedium
                                               ?.copyWith(height: 1.55),
+                                        ),
+                                        const SizedBox(height: AppSpacing.sm),
+                                        Text(
+                                          _masteryCounted
+                                              ? 'Verification mastery evidence counted for this round.'
+                                              : 'This round was already counted for the current review cycle, so mastery did not increase again.',
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .bodySmall
+                                              ?.copyWith(
+                                                color: Theme.of(context)
+                                                    .colorScheme
+                                                    .onSurfaceVariant,
+                                              ),
                                         ),
                                       ],
                                     ),

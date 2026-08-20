@@ -1,3 +1,5 @@
+import 'learning_topic.dart';
+
 class Quiz {
   final String id;
   final String title;
@@ -6,6 +8,7 @@ class Quiz {
   final List<String> options;
   final int correctIndex;
   final String explanation;
+  final LearningTopic? topic;
 
   const Quiz({
     required this.id,
@@ -15,6 +18,7 @@ class Quiz {
     required this.options,
     required this.correctIndex,
     required this.explanation,
+    this.topic,
   });
 
   bool get isValid =>

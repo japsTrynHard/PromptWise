@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../controllers/learning_progression_controller.dart';
 import '../../controllers/progress_controller.dart';
+import '../../models/learning_progression.dart';
 import '../../models/lesson.dart';
 import '../../routes/app_routes.dart';
 import '../../utils/constants.dart';
@@ -18,6 +20,7 @@ class ModuleListScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final progressController = context.watch<ProgressController>();
+    final progression = context.watch<LearningProgressionController>();
     final completed = module.lessons
         .where((lesson) => progressController.isLessonCompleted(lesson.id))
         .length;
@@ -150,6 +153,12 @@ class ModuleListScreen extends StatelessWidget {
                         final lesson = module.lessons[index];
                         final isCompleted = progressController
                             .isLessonCompleted(lesson.id);
+                        final topic = lesson.topic ?? module.topic;
+                        final topicRank = topic == null
+                            ? null
+                            : progression.rankFor(topic);
+                        final unlocked = topicRank == null ||
+                            lesson.learningLevel <= topicRank.rank.level + 1;
 
                         return Padding(
                           padding: EdgeInsets.only(
@@ -158,11 +167,13 @@ class ModuleListScreen extends StatelessWidget {
                                 : AppSpacing.md,
                           ),
                           child: AppCard(
-                            onTap: () => Navigator.pushNamed(
-                              context,
-                              AppRoutes.lesson,
-                              arguments: lesson,
-                            ),
+                            onTap: unlocked
+                                ? () => Navigator.pushNamed(
+                                      context,
+                                      AppRoutes.lesson,
+                                      arguments: lesson,
+                                    )
+                                : null,
                             child: Row(
                               children: [
                                 Container(
@@ -203,30 +214,51 @@ class ModuleListScreen extends StatelessWidget {
                                     crossAxisAlignment:
                                         CrossAxisAlignment.start,
                                     children: [
-                                      Text(
-                                        lesson.title,
-                                        style: Theme.of(
-                                          context,
-                                        ).textTheme.titleMedium,
+                                      Row(
+                                        children: [
+                                          Expanded(
+                                            child: Text(
+                                              lesson.title,
+                                              style: Theme.of(context)
+                                                  .textTheme
+                                                  .titleMedium,
+                                            ),
+                                          ),
+                                          const SizedBox(width: AppSpacing.sm),
+                                          Chip(
+                                            visualDensity: VisualDensity.compact,
+                                            label: Text(
+                                              LearningRankX.fromLevel(
+                                                lesson.learningLevel,
+                                              ).label,
+                                            ),
+                                          ),
+                                        ],
                                       ),
                                       const SizedBox(height: AppSpacing.xs),
                                       Text(
-                                        isCompleted
-                                            ? '${lesson.estimatedMinutes} min · Completed'
-                                            : '${lesson.estimatedMinutes} min · Read and check your understanding',
+                                        !unlocked
+                                            ? 'Locked until your current rank is ready for this challenge.'
+                                            : isCompleted
+                                                ? '${lesson.estimatedMinutes} min · Completed'
+                                                : '${lesson.estimatedMinutes} min · ${topicRank?.displayLabel ?? 'Open level'}',
                                         style: Theme.of(context)
                                             .textTheme
                                             .bodySmall
                                             ?.copyWith(
-                                              color: Theme.of(
-                                                context,
-                                              ).colorScheme.onSurfaceVariant,
+                                              color: Theme.of(context)
+                                                  .colorScheme
+                                                  .onSurfaceVariant,
                                             ),
                                       ),
                                     ],
                                   ),
                                 ),
-                                const Icon(Icons.chevron_right_rounded),
+                                Icon(
+                                  unlocked
+                                      ? Icons.chevron_right_rounded
+                                      : Icons.lock_outline_rounded,
+                                ),
                               ],
                             ),
                           ),

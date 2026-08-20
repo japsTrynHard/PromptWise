@@ -47,6 +47,10 @@ class ProgressController extends ChangeNotifier {
   bool get isInitialized => _isInitialized;
   String? get errorMessage => _errorMessage;
   int get maximumQuizScore => _quizIds.length * 100;
+  int get currentQuizScore => _quizIds.fold<int>(
+    0,
+    (total, id) => total + (_progress.quizBestScores[id] ?? 0),
+  );
   String? get activeUserId => _activeUserId;
   DateTime? get lastSyncedAt => _lastSyncedAt;
   ProgressSyncState get syncState => _syncState;
@@ -101,6 +105,7 @@ class ProgressController extends ChangeNotifier {
       ),
     );
     _updateLevelInMemory();
+    scheduleMicrotask(notifyListeners);
   }
 
   Future<void> bindAuthenticatedUser(String? userId) async {
@@ -189,6 +194,43 @@ class ProgressController extends ChangeNotifier {
     await init();
   }
 
+  Future<void> refreshFromCloud() async {
+    final userId = _activeUserId;
+    final repository = _remoteRepository;
+    if (userId == null || repository == null || _isLoading) return;
+
+    _isLoading = true;
+    _syncState = ProgressSyncState.syncing;
+    _errorMessage = null;
+    notifyListeners();
+
+    try {
+      final remote = await repository.fetchProgress(
+        userId: userId,
+        totalLessons: _lessonIds.length,
+      );
+      if (_activeUserId != userId) return;
+      if (remote != null) {
+        _progress = _sanitizeProgress(_mergeProgress(_progress, remote));
+        _updateLevelInMemory();
+        await _persistLocal(prefix: _prefixFor(userId));
+      }
+      _syncState = ProgressSyncState.synced;
+      _lastSyncedAt = DateTime.now();
+    } catch (_) {
+      if (_activeUserId == userId) {
+        _syncState = ProgressSyncState.error;
+        _errorMessage =
+            'Your saved progress is available, but the latest online progress could not be refreshed.';
+      }
+    } finally {
+      if (_activeUserId == userId) {
+        _isLoading = false;
+        notifyListeners();
+      }
+    }
+  }
+
   void clearError() {
     if (_errorMessage == null) return;
     _errorMessage = null;
@@ -254,9 +296,12 @@ class ProgressController extends ChangeNotifier {
   }
 
   UserProgress _readLocalProgress({required String prefix}) {
-    final completed = _storage
-        .getStringList('$prefix$_completedLessonsKey')
-        .where(_lessonIds.contains)
+    final storedCompleted = _storage.getStringList(
+      '$prefix$_completedLessonsKey',
+    );
+    final completed = (_lessonIds.isEmpty
+            ? storedCompleted
+            : storedCompleted.where(_lessonIds.contains))
         .toSet()
         .toList(growable: false);
     var quizScores = _sanitizeQuizScores(
@@ -310,11 +355,15 @@ class ProgressController extends ChangeNotifier {
   }
 
   UserProgress _sanitizeProgress(UserProgress value) {
+    final completedLessons = _lessonIds.isEmpty
+        ? value.completedLessonIds.toSet().toList(growable: false)
+        : value.completedLessonIds
+              .where(_lessonIds.contains)
+              .toSet()
+              .toList(growable: false);
+
     return UserProgress(
-      completedLessonIds: value.completedLessonIds
-          .where(_lessonIds.contains)
-          .toSet()
-          .toList(growable: false),
+      completedLessonIds: completedLessons,
       totalLessons: _lessonIds.length,
       quizBestScores: _sanitizeQuizScores(value.quizBestScores),
       badges: value.badges
@@ -327,10 +376,15 @@ class ProgressController extends ChangeNotifier {
   }
 
   Map<String, int> _sanitizeQuizScores(Map<String, int> storedScores) {
+    // Never delete historical quiz keys just because live content has not
+    // loaded yet, was archived, or was temporarily absent from a cached list.
+    // Current screens read scores by current quiz ID, while Phase 6 can still
+    // reconcile valid historical evidence later.
     final result = <String, int>{};
-    for (final quizId in _quizIds) {
-      final stored = storedScores[quizId] ?? 0;
-      if (stored > 0) result[quizId] = stored.clamp(0, 100).toInt();
+    for (final entry in storedScores.entries) {
+      final id = entry.key.trim();
+      if (id.isEmpty || entry.value <= 0) continue;
+      result[id] = entry.value.clamp(0, 100).toInt();
     }
     return result;
   }
@@ -344,10 +398,10 @@ class ProgressController extends ChangeNotifier {
   void _updateLevelInMemory() {
     var level = 'Beginner';
     if (_progress.completedLessons >= _progress.totalLessons &&
-        _progress.quizScore >= maximumQuizScore &&
+        currentQuizScore >= maximumQuizScore &&
         maximumQuizScore > 0) {
       level = 'Advanced';
-    } else if (_progress.completedLessons >= 2 || _progress.quizScore >= 100) {
+    } else if (_progress.completedLessons >= 2 || currentQuizScore >= 100) {
       level = 'Intermediate';
     }
     if (level != _progress.knowledgeLevel) {

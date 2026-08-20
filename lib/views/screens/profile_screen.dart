@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../controllers/adaptive_learning_controller.dart';
 import '../../controllers/auth_controller.dart';
 import '../../controllers/progress_controller.dart';
 import '../../controllers/theme_controller.dart';
@@ -19,6 +20,7 @@ class ProfileScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final progressController = context.watch<ProgressController>();
+    final adaptive = context.watch<AdaptiveLearningController>();
     final auth = context.watch<AuthController>();
     final progress = progressController.progress;
 
@@ -51,8 +53,30 @@ class ProfileScreen extends StatelessWidget {
                   level: progress.knowledgeLevel,
                   completed: progress.completedLessons,
                   total: progress.totalLessons,
-                  quizScore: progress.quizScore,
+                  quizScore: progressController.currentQuizScore,
                   maximumQuizScore: progressController.maximumQuizScore,
+                ),
+                const SizedBox(height: AppSpacing.section),
+                Text(
+                  'Adaptive learning',
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
+                const SizedBox(height: AppSpacing.md),
+                AppCard(
+                  padding: EdgeInsets.zero,
+                  child: _SettingsTile(
+                    icon: Icons.route_outlined,
+                    title: adaptive.diagnosticCompleted
+                        ? 'Mastery profile: ${adaptive.overallMastery}%'
+                        : 'Set up your learning path',
+                    subtitle: adaptive.diagnosticCompleted
+                        ? '${adaptive.recommendationReason} Review topic mastery and scheduled reviews.'
+                        : 'Take the five-question diagnostic to activate personalized recommendations.',
+                    onTap: () => Navigator.pushNamed(
+                      context,
+                      AppRoutes.adaptiveLearning,
+                    ),
+                  ),
                 ),
                 const SizedBox(height: AppSpacing.section),
                 Text('Account', style: Theme.of(context).textTheme.titleLarge),

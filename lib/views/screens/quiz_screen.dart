@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../controllers/adaptive_learning_controller.dart';
 import '../../controllers/progress_controller.dart';
+import '../../models/learning_topic.dart';
 import '../../models/quiz.dart';
 import '../../utils/constants.dart';
 import '../widgets/adaptive_layout.dart';
@@ -23,6 +25,7 @@ class _QuizScreenState extends State<QuizScreen> {
   bool _answered = false;
   bool _isSubmitting = false;
   bool _scoreAdded = false;
+  bool _masteryCounted = false;
 
   bool get _isCorrect => _selectedIndex == widget.quiz.correctIndex;
 
@@ -34,6 +37,24 @@ class _QuizScreenState extends State<QuizScreen> {
       _isSubmitting = true;
     });
 
+    // Record adaptive evidence before updating the legacy best-score map.
+    // Otherwise the progress provider can observe the new 100% score first and
+    // mistakenly import it as pre-Phase-6 legacy evidence, double-counting the
+    // same answer.
+    final topic = widget.quiz.topic;
+    var masteryCounted = false;
+    if (topic != null) {
+      masteryCounted = await context
+          .read<AdaptiveLearningController>()
+          .recordPracticeAttempt(
+            itemId: widget.quiz.id,
+            topic: topic,
+            isCorrect: _isCorrect,
+            attemptType: 'quiz',
+          );
+    }
+    if (!mounted) return;
+
     final scoreAdded = await context
         .read<ProgressController>()
         .recordQuizResult(quizId: widget.quiz.id, isCorrect: _isCorrect);
@@ -41,6 +62,7 @@ class _QuizScreenState extends State<QuizScreen> {
     if (!mounted) return;
     setState(() {
       _scoreAdded = scoreAdded;
+      _masteryCounted = masteryCounted;
       _isSubmitting = false;
     });
   }
@@ -51,6 +73,7 @@ class _QuizScreenState extends State<QuizScreen> {
       _answered = false;
       _isSubmitting = false;
       _scoreAdded = false;
+      _masteryCounted = false;
     });
   }
 
@@ -87,6 +110,19 @@ class _QuizScreenState extends State<QuizScreen> {
                                       'Choose one answer. After submitting, review why it is correct or what needs reconsideration.',
                                 ),
                                 const SizedBox(height: AppSpacing.xxl),
+                                if (widget.quiz.topic != null) ...[
+                                  Align(
+                                    alignment: Alignment.centerLeft,
+                                    child: Chip(
+                                      avatar: const Icon(
+                                        Icons.track_changes_outlined,
+                                        size: 18,
+                                      ),
+                                      label: Text(widget.quiz.topic!.label),
+                                    ),
+                                  ),
+                                  const SizedBox(height: AppSpacing.md),
+                                ],
                                 AppCard(
                                   backgroundColor: Theme.of(context)
                                       .colorScheme
@@ -198,12 +234,19 @@ class _QuizScreenState extends State<QuizScreen> {
 
   String get _feedbackTitle {
     if (_isSubmitting) return 'Checking and saving your result...';
+    final hasAdaptiveTopic = widget.quiz.topic != null;
+    final evidenceText = !hasAdaptiveTopic
+        ? ''
+        : _masteryCounted
+            ? ' Mastery evidence was counted.'
+            : ' This retry did not add new mastery evidence.';
     if (!_isCorrect) {
-      return 'Review the explanation, then decide whether to try again.';
+      return 'Review the explanation, then decide whether to try again.$evidenceText';
     }
-    return _scoreAdded
+    final scoreText = _scoreAdded
         ? 'Correct. Your best score was recorded.'
         : 'Correct. Your best score for this quiz was already recorded.';
+    return '$scoreText$evidenceText';
   }
 
   Widget _buildAction(BuildContext context) {
@@ -303,24 +346,29 @@ class _AnswerOption extends StatelessWidget {
             width: isSelected || (answered && isCorrect) ? 2 : 1,
           ),
         ),
-        child: RadioListTile<int>(
-          value: index,
-          enabled: !answered,
-          contentPadding: const EdgeInsets.symmetric(
-            horizontal: AppSpacing.lg,
-            vertical: AppSpacing.sm,
+        child: Material(
+          color: Colors.transparent,
+          borderRadius: BorderRadius.circular(AppRadius.lg),
+          clipBehavior: Clip.antiAlias,
+          child: RadioListTile<int>(
+            value: index,
+            enabled: !answered,
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.lg,
+              vertical: AppSpacing.sm,
+            ),
+            title: Text(text, style: Theme.of(context).textTheme.bodyLarge),
+            secondary: statusIcon == null
+                ? CircleAvatar(
+                    radius: 16,
+                    backgroundColor: colorScheme.surfaceContainerHighest,
+                    child: Text(
+                      String.fromCharCode(65 + index),
+                      style: Theme.of(context).textTheme.labelMedium,
+                    ),
+                  )
+                : Icon(statusIcon, color: statusColor),
           ),
-          title: Text(text, style: Theme.of(context).textTheme.bodyLarge),
-          secondary: statusIcon == null
-              ? CircleAvatar(
-                  radius: 16,
-                  backgroundColor: colorScheme.surfaceContainerHighest,
-                  child: Text(
-                    String.fromCharCode(65 + index),
-                    style: Theme.of(context).textTheme.labelMedium,
-                  ),
-                )
-              : Icon(statusIcon, color: statusColor),
         ),
       ),
     );
