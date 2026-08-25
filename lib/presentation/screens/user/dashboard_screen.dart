@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../controllers/auth_controller.dart';
 import '../../../core/routes/app_routes.dart';
 import '../../../core/utils/constants.dart';
+import '../../widgets/adaptive_layout.dart';
 import '../../widgets/app_logo.dart';
 import '../../widgets/floating_glass_navigation.dart';
 import './home_screen.dart';
@@ -165,7 +166,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final useRail = constraints.maxWidth >= AppBreakpoints.tablet;
+        final useRail = AdaptiveLayout.prefersRailNavigation(
+          context,
+          availableWidth: constraints.maxWidth,
+        );
         final extendedRail = constraints.maxWidth >= AppBreakpoints.desktop;
         final page = _animatedPage(context);
 
@@ -193,7 +197,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
           );
         }
 
-        final navHeight = 82 + MediaQuery.viewPaddingOf(context).bottom;
+        final bottomInset = MediaQuery.viewPaddingOf(context).bottom;
+        final navHeight = FloatingGlassNavigation.surfaceHeight +
+            bottomInset +
+            AppSpacing.lg;
         return Scaffold(
           extendBody: true,
           body: _LearnerAmbientBackground(

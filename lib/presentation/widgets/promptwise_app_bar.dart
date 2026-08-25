@@ -30,8 +30,10 @@ class PromptWiseAppBar extends StatelessWidget implements PreferredSizeWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final compact = MediaQuery.sizeOf(context).width < AppBreakpoints.compact;
-    final toolbarHeight = compact ? 76.0 : 90.0;
+    final width = MediaQuery.sizeOf(context).width;
+    final compact = width < AppBreakpoints.compact;
+    final veryNarrow = width < 360;
+    final toolbarHeight = compact ? 78.0 : 90.0;
 
     return AppBar(
       automaticallyImplyLeading: false,
@@ -43,18 +45,23 @@ class PromptWiseAppBar extends StatelessWidget implements PreferredSizeWidget {
       flexibleSpace: RepaintBoundary(
         child: ClipRect(
           child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
+            filter: ImageFilter.blur(
+              sigmaX: compact ? 8 : 12,
+              sigmaY: compact ? 8 : 12,
+            ),
             child: ColoredBox(
               color: theme.scaffoldBackgroundColor.withValues(alpha: 0.93),
             ),
           ),
         ),
       ),
-      leadingWidth: showBack ? (compact ? 66 : 78) : 0,
+      leadingWidth: showBack ? (veryNarrow ? 58 : (compact ? 66 : 78)) : 0,
       leading: showBack
           ? Padding(
               padding: EdgeInsets.only(
-                left: compact ? AppSpacing.md : AppSpacing.xl,
+                left: veryNarrow
+                    ? AppSpacing.sm
+                    : (compact ? AppSpacing.md : AppSpacing.xl),
                 top: AppSpacing.sm,
                 bottom: AppSpacing.sm,
               ),
@@ -87,9 +94,12 @@ class PromptWiseAppBar extends StatelessWidget implements PreferredSizeWidget {
             title,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style:
-                (compact ? theme.textTheme.titleLarge : theme.textTheme.headlineSmall)
-                    ?.copyWith(
+            style: (veryNarrow
+                    ? theme.textTheme.titleMedium
+                    : compact
+                        ? theme.textTheme.titleLarge
+                        : theme.textTheme.headlineSmall)
+                ?.copyWith(
               color: theme.colorScheme.onSurface,
               fontWeight: FontWeight.w800,
               letterSpacing: -0.45,

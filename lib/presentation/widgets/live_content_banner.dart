@@ -31,8 +31,7 @@ class LiveContentBanner extends StatelessWidget {
     if (content.isUsingSavedContent) {
       return _Banner(
         icon: Icons.offline_pin_outlined,
-        message:
-            content.errorMessage ??
+        message: content.errorMessage ??
             'You appear to be offline. Showing saved learning content.',
         color: scheme.tertiary,
         trailing: TextButton.icon(
@@ -113,21 +112,42 @@ class _Banner extends StatelessWidget {
         borderRadius: BorderRadius.circular(AppRadius.md),
         border: Border.all(color: color.withValues(alpha: 0.35)),
       ),
-      child: Row(
-        children: [
-          Icon(icon, color: color, size: 20),
-          const SizedBox(width: AppSpacing.sm),
-          Expanded(
-            child: Text(
-              message,
-              maxLines: compact ? 1 : 3,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-          ),
-          const SizedBox(width: AppSpacing.sm),
-          trailing,
-        ],
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final copy = Row(
+            children: [
+              Icon(icon, color: color, size: 20),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: Text(
+                  message,
+                  maxLines: compact ? 1 : 3,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ),
+            ],
+          );
+
+          if (constraints.maxWidth < 440 && !compact) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                copy,
+                const SizedBox(height: AppSpacing.xs),
+                Align(alignment: Alignment.centerRight, child: trailing),
+              ],
+            );
+          }
+
+          return Row(
+            children: [
+              Expanded(child: copy),
+              const SizedBox(width: AppSpacing.sm),
+              trailing,
+            ],
+          );
+        },
       ),
     );
   }

@@ -30,11 +30,12 @@ class SyncStatusBanner extends StatelessWidget {
           Icons.offline_pin_outlined,
           color: Theme.of(context).colorScheme.onTertiaryContainer,
         ),
-        message:
-            message ??
+        message: message ??
             'Your progress is saved on this device and will update online when you reconnect.',
         isWarning: true,
         trailing: Wrap(
+          spacing: AppSpacing.xs,
+          runSpacing: AppSpacing.xs,
           children: [
             TextButton(
               onPressed: controller.retryInit,
@@ -80,6 +81,7 @@ class _Banner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(AppSpacing.md),
@@ -87,23 +89,47 @@ class _Banner extends StatelessWidget {
         color: isWarning ? scheme.tertiaryContainer : scheme.primaryContainer,
         borderRadius: BorderRadius.circular(AppRadius.sm),
       ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          icon,
-          const SizedBox(width: AppSpacing.md),
-          Expanded(
-            child: Text(
-              message,
-              style: TextStyle(
-                color: isWarning
-                    ? scheme.onTertiaryContainer
-                    : scheme.onPrimaryContainer,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final messageRow = Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              icon,
+              const SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: Text(
+                  message,
+                  style: TextStyle(
+                    color: isWarning
+                        ? scheme.onTertiaryContainer
+                        : scheme.onPrimaryContainer,
+                  ),
+                ),
               ),
-            ),
-          ),
-          if (trailing != null) trailing!,
-        ],
+            ],
+          );
+
+          if (trailing == null) return messageRow;
+
+          if (constraints.maxWidth < 480) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                messageRow,
+                const SizedBox(height: AppSpacing.sm),
+                Align(alignment: Alignment.centerRight, child: trailing!),
+              ],
+            );
+          }
+
+          return Row(
+            children: [
+              Expanded(child: messageRow),
+              const SizedBox(width: AppSpacing.sm),
+              trailing!,
+            ],
+          );
+        },
       ),
     );
   }

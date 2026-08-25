@@ -16,12 +16,14 @@ class GlassNavDestination {
   });
 }
 
-/// Floating learner navigation for compact screens.
+/// Floating learner navigation for phone-sized layouts.
 ///
-/// The glass surface is intentionally static while the small destination
-/// controls animate. Animating a large BackdropFilter is expensive on web and
-/// older phones, so the blur stays fixed and only lightweight properties move.
+/// Important: the root has an explicit finite height. An unconstrained Center
+/// inside Scaffold.bottomNavigationBar can consume the whole scaffold height on
+/// iOS/Android and narrow web layouts, leaving only the navigation island visible.
 class FloatingGlassNavigation extends StatelessWidget {
+  static const double surfaceHeight = 70;
+
   final int selectedIndex;
   final List<GlassNavDestination> destinations;
   final ValueChanged<int> onSelected;
@@ -37,76 +39,97 @@ class FloatingGlassNavigation extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final bottomInset = MediaQuery.viewPaddingOf(context).bottom;
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    final horizontal = screenWidth < 360 ? AppSpacing.sm : AppSpacing.md;
 
-    return Padding(
-      padding: EdgeInsets.fromLTRB(
-        AppSpacing.md,
-        AppSpacing.xs,
-        AppSpacing.md,
-        bottomInset > 0 ? AppSpacing.xs : AppSpacing.md,
-      ),
-      child: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 590),
-          child: RepaintBoundary(
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(34),
-              child: BackdropFilter(
-                filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: (isDark ? const Color(0xFF111827) : Colors.white)
-                        .withValues(alpha: isDark ? 0.84 : 0.80),
+    return SafeArea(
+      top: false,
+      minimum: const EdgeInsets.only(bottom: AppSpacing.xs),
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(
+          horizontal,
+          AppSpacing.xs,
+          horizontal,
+          0,
+        ),
+        child: SizedBox(
+          height: surfaceHeight,
+          child: Align(
+            alignment: Alignment.bottomCenter,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 590),
+              child: SizedBox(
+                width: double.infinity,
+                child: RepaintBoundary(
+                  child: ClipRRect(
                     borderRadius: BorderRadius.circular(34),
-                    border: Border.all(
-                      color: theme.colorScheme.outlineVariant.withValues(
-                        alpha: isDark ? 0.56 : 0.84,
-                      ),
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(
-                          alpha: isDark ? 0.25 : 0.095,
-                        ),
-                        blurRadius: 26,
-                        offset: const Offset(0, 10),
-                      ),
-                    ],
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.all(6),
-                    child: LayoutBuilder(
-                      builder: (context, constraints) {
-                        if (destinations.isEmpty) {
-                          return const SizedBox.shrink();
-                        }
-
-                        final count = destinations.length;
-                        const selectedFlex = 1.72;
-                        final unit = constraints.maxWidth /
-                            ((count - 1) + selectedFlex);
-                        final inactiveWidth = unit;
-                        final selectedWidth = unit * selectedFlex;
-
-                        return SizedBox(
-                          height: 58,
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              for (var index = 0; index < count; index++)
-                                _GlassDestinationButton(
-                                  destination: destinations[index],
-                                  selected: selectedIndex == index,
-                                  width: selectedIndex == index
-                                      ? selectedWidth
-                                      : inactiveWidth,
-                                  onTap: () => onSelected(index),
-                                ),
-                            ],
+                    child: BackdropFilter(
+                      filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: (isDark
+                                  ? const Color(0xFF111827)
+                                  : Colors.white)
+                              .withValues(alpha: isDark ? 0.88 : 0.84),
+                          borderRadius: BorderRadius.circular(34),
+                          border: Border.all(
+                            color: theme.colorScheme.outlineVariant.withValues(
+                              alpha: isDark ? 0.56 : 0.84,
+                            ),
                           ),
-                        );
-                      },
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(
+                                alpha: isDark ? 0.22 : 0.085,
+                              ),
+                              blurRadius: 20,
+                              offset: const Offset(0, 8),
+                            ),
+                          ],
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.all(6),
+                          child: LayoutBuilder(
+                            builder: (context, constraints) {
+                              if (destinations.isEmpty) {
+                                return const SizedBox.shrink();
+                              }
+
+                              final count = destinations.length;
+                              final showSelectedLabel =
+                                  constraints.maxWidth >= 340;
+                              final selectedFlex =
+                                  showSelectedLabel ? 1.72 : 1.0;
+                              final denominator =
+                                  (count - 1) + selectedFlex;
+                              final unit = constraints.maxWidth / denominator;
+                              final inactiveWidth = unit;
+                              final selectedWidth = unit * selectedFlex;
+
+                              return SizedBox(
+                                height: 58,
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    for (var index = 0;
+                                        index < count;
+                                        index++)
+                                      _GlassDestinationButton(
+                                        destination: destinations[index],
+                                        selected: selectedIndex == index,
+                                        width: selectedIndex == index
+                                            ? selectedWidth
+                                            : inactiveWidth,
+                                        showLabel: showSelectedLabel,
+                                        onTap: () => onSelected(index),
+                                      ),
+                                  ],
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                      ),
                     ),
                   ),
                 ),
@@ -123,12 +146,14 @@ class _GlassDestinationButton extends StatefulWidget {
   final GlassNavDestination destination;
   final bool selected;
   final double width;
+  final bool showLabel;
   final VoidCallback onTap;
 
   const _GlassDestinationButton({
     required this.destination,
     required this.selected,
     required this.width,
+    required this.showLabel,
     required this.onTap,
   });
 
@@ -185,9 +210,7 @@ class _GlassDestinationButtonState extends State<_GlassDestinationButton> {
                 child: InkWell(
                   onTap: widget.onTap,
                   onHighlightChanged: (value) {
-                    if (_pressed == value) {
-                      return;
-                    }
+                    if (_pressed == value) return;
                     setState(() => _pressed = value);
                   },
                   borderRadius: BorderRadius.circular(AppRadius.pill),
@@ -218,14 +241,18 @@ class _GlassDestinationButtonState extends State<_GlassDestinationButton> {
                           : null,
                     ),
                     padding: EdgeInsets.symmetric(
-                      horizontal: widget.selected ? 9 : 5,
+                      horizontal:
+                          widget.selected && widget.showLabel ? 9 : 5,
                     ),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         AnimatedScale(
                           scale: widget.selected ? 1.06 : 1,
-                          duration: AppMotion.duration(context, AppMotion.fast),
+                          duration: AppMotion.duration(
+                            context,
+                            AppMotion.fast,
+                          ),
                           curve: AppMotion.standardCurve,
                           child: Icon(
                             widget.selected
@@ -237,42 +264,45 @@ class _GlassDestinationButtonState extends State<_GlassDestinationButton> {
                                 : theme.colorScheme.onSurfaceVariant,
                           ),
                         ),
-                        Flexible(
-                          child: AnimatedSwitcher(
-                            duration:
-                                AppMotion.duration(context, AppMotion.normal),
-                            switchInCurve: AppMotion.standardCurve,
-                            switchOutCurve: AppMotion.reverseCurve,
-                            transitionBuilder: (child, animation) =>
-                                FadeTransition(
-                              opacity: animation,
-                              child: SizeTransition(
-                                axis: Axis.horizontal,
-                                sizeFactor: animation,
-                                child: child,
+                        if (widget.showLabel)
+                          Flexible(
+                            child: AnimatedSwitcher(
+                              duration: AppMotion.duration(
+                                context,
+                                AppMotion.normal,
                               ),
-                            ),
-                            child: widget.selected
-                                ? Padding(
-                                    key: ValueKey(widget.destination.label),
-                                    padding: const EdgeInsets.only(left: 7),
-                                    child: Text(
-                                      widget.destination.label,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      softWrap: false,
-                                      style:
-                                          theme.textTheme.labelMedium?.copyWith(
-                                        color: primary,
-                                        fontWeight: FontWeight.w800,
+                              switchInCurve: AppMotion.standardCurve,
+                              switchOutCurve: AppMotion.reverseCurve,
+                              transitionBuilder: (child, animation) =>
+                                  FadeTransition(
+                                opacity: animation,
+                                child: SizeTransition(
+                                  axis: Axis.horizontal,
+                                  sizeFactor: animation,
+                                  child: child,
+                                ),
+                              ),
+                              child: widget.selected
+                                  ? Padding(
+                                      key: ValueKey(widget.destination.label),
+                                      padding: const EdgeInsets.only(left: 7),
+                                      child: Text(
+                                        widget.destination.label,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        softWrap: false,
+                                        style: theme.textTheme.labelMedium
+                                            ?.copyWith(
+                                          color: primary,
+                                          fontWeight: FontWeight.w800,
+                                        ),
                                       ),
+                                    )
+                                  : const SizedBox.shrink(
+                                      key: ValueKey('inactive'),
                                     ),
-                                  )
-                                : const SizedBox.shrink(
-                                    key: ValueKey('inactive'),
-                                  ),
+                            ),
                           ),
-                        ),
                       ],
                     ),
                   ),
