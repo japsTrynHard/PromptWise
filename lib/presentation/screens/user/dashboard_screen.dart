@@ -1,11 +1,13 @@
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show ScrollDirection;
 import 'package:provider/provider.dart';
 
 import '../../controllers/auth_controller.dart';
 import '../../../core/routes/app_routes.dart';
 import '../../../core/utils/constants.dart';
+import '../../widgets/adaptive_layout.dart';
 import '../../widgets/app_logo.dart';
 import '../../widgets/floating_glass_navigation.dart';
 import './home_screen.dart';
@@ -21,9 +23,13 @@ class DashboardScreen extends StatefulWidget {
   State<DashboardScreen> createState() => _DashboardScreenState();
 }
 
-class _DashboardScreenState extends State<DashboardScreen> {
+class _DashboardScreenState extends State<DashboardScreen>
+    with SingleTickerProviderStateMixin {
   int _currentIndex = 0;
   int _tabDirection = 1;
+  bool _navMinimized = false;
+  late final AnimationController _tabController;
+  late final Animation<double> _tabCurve;
 
   static const _destinations = <GlassNavDestination>[
     GlassNavDestination(
@@ -61,65 +67,82 @@ class _DashboardScreenState extends State<DashboardScreen> {
     ProfileScreen(),
   ];
 
+  @override
+  void initState() {
+    super.initState();
+    _tabController = AnimationController(
+      vsync: this,
+      duration: AppMotion.fast,
+      value: 1,
+    );
+    _tabCurve = CurvedAnimation(
+      parent: _tabController,
+      curve: AppMotion.standardCurve,
+    );
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
+  }
+
   void _select(int index) {
     if (_currentIndex == index) {
+      if (_navMinimized) setState(() => _navMinimized = false);
       return;
     }
 
     setState(() {
       _tabDirection = index > _currentIndex ? 1 : -1;
       _currentIndex = index;
+      _navMinimized = false;
     });
+    _tabController.forward(from: 0);
   }
 
-  Widget _animatedPage(BuildContext context) {
-    final animationEnabled = AppMotion.animationsEnabled(context);
-    final page = KeyedSubtree(
-      key: ValueKey(_currentIndex),
-      child: _pages[_currentIndex],
-    );
+  void _setNavMinimized(bool value) {
+    if (_navMinimized == value || !mounted) return;
+    setState(() => _navMinimized = value);
+  }
 
-    if (!animationEnabled) {
-      return page;
+  bool _handleUserScroll(UserScrollNotification notification) {
+    if (notification.metrics.axis != Axis.vertical) return false;
+
+    if (notification.metrics.pixels <= 6) {
+      _setNavMinimized(false);
+      return false;
     }
 
-    return AnimatedSwitcher(
-      duration: AppMotion.normal,
-      reverseDuration: AppMotion.fast,
-      switchInCurve: AppMotion.standardCurve,
-      switchOutCurve: AppMotion.reverseCurve,
-      layoutBuilder: (currentChild, previousChildren) {
-        return Stack(
-          fit: StackFit.expand,
-          children: [
-            ...previousChildren,
-            if (currentChild != null) currentChild,
-          ],
-        );
-      },
-      transitionBuilder: (child, animation) {
-        final isIncoming = child.key == ValueKey(_currentIndex);
-        final direction = isIncoming ? _tabDirection : -_tabDirection;
-        final curved = CurvedAnimation(
-          parent: animation,
-          curve: AppMotion.standardCurve,
-          reverseCurve: AppMotion.reverseCurve,
-        );
-        final slide = Tween<Offset>(
-          begin: Offset(0.016 * direction, 0.004),
-          end: Offset.zero,
-        ).animate(curved);
-        final fade = Tween<double>(begin: 0.9, end: 1).animate(curved);
+    if (notification.direction == ScrollDirection.reverse) {
+      _setNavMinimized(true);
+    } else if (notification.direction == ScrollDirection.forward) {
+      _setNavMinimized(false);
+    }
+    return false;
+  }
 
-        return FadeTransition(
-          opacity: fade,
-          child: SlideTransition(
-            position: slide,
-            child: RepaintBoundary(child: child),
+  Widget _persistentPageStack(BuildContext context) {
+    final animationsEnabled = AppMotion.animationsEnabled(context);
+    final stack = IndexedStack(index: _currentIndex, children: _pages);
+
+    if (!animationsEnabled) return stack;
+
+    return AnimatedBuilder(
+      animation: _tabCurve,
+      child: stack,
+      builder: (context, child) {
+        final value = _tabCurve.value;
+        final dx = (1 - value) * 5 * _tabDirection;
+        final opacity = 0.94 + (0.06 * value);
+        return Opacity(
+          opacity: opacity,
+          child: Transform.translate(
+            offset: Offset(dx, 0),
+            child: child,
           ),
         );
       },
-      child: page,
     );
   }
 
@@ -167,9 +190,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final useRail = constraints.maxWidth >= AppBreakpoints.tablet;
+        final phone = AdaptiveLayout.isPhone(context);
+        final useRail = !phone && constraints.maxWidth >= AppBreakpoints.compact;
         final extendedRail = constraints.maxWidth >= AppBreakpoints.desktop;
-        final page = _animatedPage(context);
+        final page = _persistentPageStack(context);
 
         if (useRail) {
           return Scaffold(
@@ -195,48 +219,45 @@ class _DashboardScreenState extends State<DashboardScreen> {
           );
         }
 
-        final bottomInset = MediaQuery.viewPaddingOf(context).bottom;
-        const floatingNavHeight = 74.0;
-        const topHeaderHeight = 76.0;
-        final pageBottomPadding = floatingNavHeight + bottomInset + 18;
-        final pageTopPadding = topHeaderHeight + 8;
+        final topInset = MediaQuery.viewPaddingOf(context).top;
+        final pageTopPadding = topInset + 58;
 
         return Scaffold(
           extendBody: true,
           body: _LearnerAmbientBackground(
-            child: Stack(
-              children: [
-                Positioned.fill(
-                  child: Padding(
-                    padding: EdgeInsets.only(
-                      top: pageTopPadding,
-                      bottom: pageBottomPadding,
+            child: NotificationListener<UserScrollNotification>(
+              onNotification: _handleUserScroll,
+              child: Stack(
+                children: [
+                  Positioned.fill(
+                    child: Padding(
+                      padding: EdgeInsets.only(top: pageTopPadding),
+                      child: page,
                     ),
-                    child: page,
                   ),
-                ),
-                Positioned(
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  child: _LearnerMobileTopBar(
-                    displayName: auth.displayName,
-                    isLoading: auth.isLoading,
-                    onSignOut: _signOut,
+                  Positioned(
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    child: _LearnerMobileTopBar(
+                      displayName: auth.displayName,
+                      onProfile: () => _select(4),
+                    ),
                   ),
-                ),
-                Positioned(
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  child: FloatingGlassNavigation(
-                    selectedIndex: _currentIndex,
-                    destinations: _destinations,
-                    onSelected: _select,
-                    showSelectedLabel: constraints.maxWidth >= 410,
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    child: FloatingGlassNavigation(
+                      selectedIndex: _currentIndex,
+                      destinations: _destinations,
+                      onSelected: _select,
+                      minimized: _navMinimized,
+                      showSelectedLabel: constraints.maxWidth >= 420,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         );
@@ -254,22 +275,35 @@ class _LearnerAmbientBackground extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
+    final compact = MediaQuery.sizeOf(context).width < AppBreakpoints.tablet;
 
-    return Stack(
-      children: [
-        Positioned.fill(
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
+    final background = DecoratedBox(
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF080D18) : const Color(0xFFFAFAFC),
+        gradient: compact
+            ? null
+            : LinearGradient(
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
                 colors: isDark
                     ? const [Color(0xFF080D18), Color(0xFF0B1220)]
                     : const [Color(0xFFFCFCFF), Color(0xFFF7F8FC)],
               ),
-            ),
-          ),
-        ),
+      ),
+    );
+
+    if (compact) {
+      return Stack(
+        children: [
+          Positioned.fill(child: background),
+          Positioned.fill(child: child),
+        ],
+      );
+    }
+
+    return Stack(
+      children: [
+        Positioned.fill(child: background),
         Positioned(
           top: -120,
           right: -90,
@@ -294,13 +328,11 @@ class _LearnerAmbientBackground extends StatelessWidget {
 
 class _LearnerMobileTopBar extends StatelessWidget {
   final String displayName;
-  final bool isLoading;
-  final VoidCallback onSignOut;
+  final VoidCallback onProfile;
 
   const _LearnerMobileTopBar({
     required this.displayName,
-    required this.isLoading,
-    required this.onSignOut,
+    required this.onProfile,
   });
 
   @override
@@ -308,72 +340,45 @@ class _LearnerMobileTopBar extends StatelessWidget {
     final theme = Theme.of(context);
     final topInset = MediaQuery.viewPaddingOf(context).top;
     final isDark = theme.brightness == Brightness.dark;
+    final firstName = displayName.trim().isEmpty
+        ? 'Learner'
+        : displayName.trim().split(' ').first;
 
     return RepaintBoundary(
       child: ClipRect(
         child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+          filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
           child: Container(
             padding: EdgeInsets.fromLTRB(
               AppSpacing.lg,
-              topInset + AppSpacing.sm,
+              topInset + 7,
               AppSpacing.lg,
-              AppSpacing.sm,
+              7,
             ),
             decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [
-                  theme.scaffoldBackgroundColor.withValues(alpha: isDark ? 0.82 : 0.88),
-                  theme.scaffoldBackgroundColor.withValues(alpha: isDark ? 0.62 : 0.68),
-                ],
+              color: theme.scaffoldBackgroundColor.withValues(
+                alpha: isDark ? 0.82 : 0.86,
               ),
               border: Border(
                 bottom: BorderSide(
-                  color: theme.colorScheme.outlineVariant.withValues(alpha: 0.5),
+                  color: theme.colorScheme.outlineVariant.withValues(alpha: 0.38),
                 ),
               ),
             ),
             child: Row(
               children: [
-                Container(
-                  width: 34,
-                  height: 34,
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(12),
-                    gradient: const LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: [
-                        AppColors.primary,
-                        AppColors.violet,
-                        AppColors.teal,
-                      ],
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: AppColors.primary.withValues(alpha: 0.2),
-                        blurRadius: 16,
-                        offset: const Offset(0, 6),
-                      ),
-                    ],
-                  ),
-                  padding: const EdgeInsets.all(5),
-                  child: const FittedBox(
-                    child: AppLogo(size: 28, showWordmark: false),
-                  ),
-                ),
-                const SizedBox(width: AppSpacing.md),
                 Expanded(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                  child: Row(
                     children: [
+                      const AppLogo(size: 30, showWordmark: false),
+                      const SizedBox(width: 9),
                       RichText(
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         text: TextSpan(
                           style: theme.textTheme.titleLarge?.copyWith(
                             fontWeight: FontWeight.w900,
+                            fontSize: 21,
                             letterSpacing: -0.85,
                             color: theme.colorScheme.onSurface,
                           ),
@@ -386,73 +391,30 @@ class _LearnerMobileTopBar extends StatelessWidget {
                           ],
                         ),
                       ),
-                      Text(
-                        'Hi, ${displayName.split(' ').first}',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.labelMedium?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
                     ],
                   ),
                 ),
-                _TopBarIconButton(
-                  tooltip: 'Sign out',
-                  icon: Icons.logout_rounded,
-                  loading: isLoading,
-                  onPressed: isLoading ? null : onSignOut,
+                Tooltip(
+                  message: 'Profile · $firstName',
+                  child: Material(
+                    color: theme.colorScheme.surface.withValues(alpha: 0.62),
+                    shape: CircleBorder(
+                      side: BorderSide(
+                        color: theme.colorScheme.outlineVariant.withValues(alpha: 0.62),
+                      ),
+                    ),
+                    clipBehavior: Clip.antiAlias,
+                    child: InkWell(
+                      customBorder: const CircleBorder(),
+                      onTap: onProfile,
+                      child: const SizedBox.square(
+                        dimension: 38,
+                        child: Icon(Icons.person_outline_rounded, size: 20),
+                      ),
+                    ),
+                  ),
                 ),
               ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _TopBarIconButton extends StatelessWidget {
-  final String tooltip;
-  final IconData icon;
-  final VoidCallback? onPressed;
-  final bool loading;
-
-  const _TopBarIconButton({
-    required this.tooltip,
-    required this.icon,
-    required this.onPressed,
-    this.loading = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return Tooltip(
-      message: tooltip,
-      child: Material(
-        color: theme.colorScheme.surface.withValues(alpha: 0.62),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-          side: BorderSide(
-            color: theme.colorScheme.outlineVariant.withValues(alpha: 0.68),
-          ),
-        ),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(16),
-          onTap: onPressed,
-          child: SizedBox(
-            width: 42,
-            height: 42,
-            child: Center(
-              child: loading
-                  ? const SizedBox.square(
-                      dimension: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : Icon(icon, size: 20),
             ),
           ),
         ),

@@ -110,12 +110,14 @@ class _QuizScreenState extends State<QuizScreen> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                const PageIntro(
-                                  title: 'Check your understanding',
-                                  description:
-                                      'Choose one answer. After submitting, review why it is correct or what needs reconsideration.',
-                                ),
-                                const SizedBox(height: AppSpacing.xxl),
+                                if (!AdaptiveLayout.isPhone(context)) ...[
+                                  const PageIntro(
+                                    title: 'Check your understanding',
+                                    description:
+                                        'Choose one answer. After submitting, review why it is correct or what needs reconsideration.',
+                                  ),
+                                  const SizedBox(height: AppSpacing.xxl),
+                                ],
                                 if (widget.quiz.topic != null) ...[
                                   Align(
                                     alignment: Alignment.centerLeft,

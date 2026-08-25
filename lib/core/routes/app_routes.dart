@@ -1,3 +1,5 @@
+import 'package:flutter/cupertino.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../data/models/auth_otp_request.dart';
@@ -163,71 +165,97 @@ class AppRoutes {
     }
   }
 
-  static PageRouteBuilder<dynamic> _page(
+  static Route<dynamic> _page(
     RouteSettings settings,
     Widget child, {
     bool fadeOnly = false,
   }) {
+    if (fadeOnly) {
+      return PageRouteBuilder<dynamic>(
+        settings: settings,
+        transitionDuration: AppMotion.fast,
+        reverseTransitionDuration: AppMotion.fast,
+        pageBuilder: (_, __, ___) => child,
+        transitionsBuilder:
+            (context, animation, secondaryAnimation, routeChild) {
+          if (!AppMotion.animationsEnabled(context)) return routeChild;
+          final curved = CurvedAnimation(
+            parent: animation,
+            curve: AppMotion.standardCurve,
+            reverseCurve: AppMotion.reverseCurve,
+          );
+          return FadeTransition(
+            opacity: Tween<double>(begin: 0.94, end: 1).animate(curved),
+            child: routeChild,
+          );
+        },
+      );
+    }
+
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) {
+      // Native iOS push/pop motion also restores the familiar edge-swipe back
+      // gesture instead of making every detail page feel like a custom demo.
+      return CupertinoPageRoute<dynamic>(
+        settings: settings,
+        builder: (_) => child,
+      );
+    }
+
+    final desktopPlatform = defaultTargetPlatform == TargetPlatform.windows ||
+        defaultTargetPlatform == TargetPlatform.linux ||
+        defaultTargetPlatform == TargetPlatform.macOS;
+
+    if (kIsWeb || desktopPlatform) {
+      return PageRouteBuilder<dynamic>(
+        settings: settings,
+        transitionDuration: AppMotion.fast,
+        reverseTransitionDuration: AppMotion.fast,
+        pageBuilder: (_, __, ___) => child,
+        transitionsBuilder:
+            (context, animation, secondaryAnimation, routeChild) {
+          if (!AppMotion.animationsEnabled(context)) return routeChild;
+          final curved = CurvedAnimation(
+            parent: animation,
+            curve: AppMotion.standardCurve,
+            reverseCurve: AppMotion.reverseCurve,
+          );
+          final fade = Tween<double>(begin: 0.95, end: 1).animate(curved);
+          final slide = Tween<Offset>(
+            begin: const Offset(0, 0.008),
+            end: Offset.zero,
+          ).animate(curved);
+          return FadeTransition(
+            opacity: fade,
+            child: SlideTransition(position: slide, child: routeChild),
+          );
+        },
+      );
+    }
+
+    // Android uses a short Material-style forward motion: mostly fade with a
+    // very small vertical offset so navigation feels immediate rather than
+    // like a full-screen carousel.
     return PageRouteBuilder<dynamic>(
       settings: settings,
-      transitionDuration: AppMotion.page,
+      transitionDuration: AppMotion.normal,
       reverseTransitionDuration: AppMotion.normal,
       pageBuilder: (_, __, ___) => child,
-      transitionsBuilder: (context, animation, secondaryAnimation, routeChild) {
-        if (!AppMotion.animationsEnabled(context)) {
-          return routeChild;
-        }
-
+      transitionsBuilder:
+          (context, animation, secondaryAnimation, routeChild) {
+        if (!AppMotion.animationsEnabled(context)) return routeChild;
         final curved = CurvedAnimation(
           parent: animation,
           curve: AppMotion.standardCurve,
           reverseCurve: AppMotion.reverseCurve,
         );
-
-        if (fadeOnly) {
-          return FadeTransition(
-            opacity: Tween<double>(begin: 0.88, end: 1).animate(curved),
-            child: routeChild,
-          );
-        }
-
-        final platform = Theme.of(context).platform;
-        final appleStyle =
-            platform == TargetPlatform.iOS || platform == TargetPlatform.macOS;
-
-        final incomingOffset = appleStyle
-            ? const Offset(0.075, 0)
-            : const Offset(0.024, 0.010);
-
+        final fade = Tween<double>(begin: 0.93, end: 1).animate(curved);
         final slide = Tween<Offset>(
-          begin: incomingOffset,
+          begin: const Offset(0.012, 0.010),
           end: Offset.zero,
         ).animate(curved);
-
-        final fade = Tween<double>(
-          begin: appleStyle ? 0.96 : 0.90,
-          end: 1,
-        ).animate(curved);
-
-        final outgoingFade = Tween<double>(
-          begin: 1,
-          end: 0.985,
-        ).animate(
-          CurvedAnimation(
-            parent: secondaryAnimation,
-            curve: AppMotion.standardCurve,
-          ),
-        );
-
         return FadeTransition(
-          opacity: outgoingFade,
-          child: FadeTransition(
-            opacity: fade,
-            child: SlideTransition(
-              position: slide,
-              child: routeChild,
-            ),
-          ),
+          opacity: fade,
+          child: SlideTransition(position: slide, child: routeChild),
         );
       },
     );

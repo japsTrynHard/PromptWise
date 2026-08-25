@@ -4,6 +4,11 @@ import 'package:flutter/material.dart';
 
 import '../../core/utils/constants.dart';
 
+/// Compact system header for learner detail screens.
+///
+/// Mobile intentionally keeps only the back control, page title and essential
+/// actions. Eyebrows/subtitles stay available on larger layouts so a phone
+/// never loses a large portion of its viewport to chrome.
 class PromptWiseAppBar extends StatelessWidget implements PreferredSizeWidget {
   final String title;
   final String? eyebrow;
@@ -25,15 +30,14 @@ class PromptWiseAppBar extends StatelessWidget implements PreferredSizeWidget {
   });
 
   @override
-  Size get preferredSize => const Size.fromHeight(92);
+  Size get preferredSize => const Size.fromHeight(62);
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final width = MediaQuery.sizeOf(context).width;
-    final compact = width < AppBreakpoints.compact;
-    final veryNarrow = width < 360;
-    final toolbarHeight = compact ? 78.0 : 90.0;
+    final compact = MediaQuery.sizeOf(context).shortestSide < AppBreakpoints.compact;
+    final toolbarHeight = compact ? 54.0 : 62.0;
+    final isDark = theme.brightness == Brightness.dark;
 
     return AppBar(
       automaticallyImplyLeading: false,
@@ -45,25 +49,22 @@ class PromptWiseAppBar extends StatelessWidget implements PreferredSizeWidget {
       flexibleSpace: RepaintBoundary(
         child: ClipRect(
           child: BackdropFilter(
-            filter: ImageFilter.blur(
-              sigmaX: compact ? 8 : 12,
-              sigmaY: compact ? 8 : 12,
-            ),
+            filter: ImageFilter.blur(sigmaX: 11, sigmaY: 11),
             child: ColoredBox(
-              color: theme.scaffoldBackgroundColor.withValues(alpha: 0.93),
+              color: theme.scaffoldBackgroundColor.withValues(
+                alpha: isDark ? 0.86 : 0.90,
+              ),
             ),
           ),
         ),
       ),
-      leadingWidth: showBack ? (veryNarrow ? 58 : (compact ? 66 : 78)) : 0,
+      leadingWidth: showBack ? (compact ? 54 : 62) : 0,
       leading: showBack
           ? Padding(
               padding: EdgeInsets.only(
-                left: veryNarrow
-                    ? AppSpacing.sm
-                    : (compact ? AppSpacing.md : AppSpacing.xl),
-                top: AppSpacing.sm,
-                bottom: AppSpacing.sm,
+                left: compact ? AppSpacing.md : AppSpacing.lg,
+                top: 8,
+                bottom: 8,
               ),
               child: _PromptWiseBackButton(
                 tooltip: backTooltip,
@@ -71,13 +72,12 @@ class PromptWiseAppBar extends StatelessWidget implements PreferredSizeWidget {
               ),
             )
           : null,
-      titleSpacing:
-          showBack ? AppSpacing.sm : (compact ? AppSpacing.lg : AppSpacing.xl),
+      titleSpacing: showBack ? AppSpacing.sm : AppSpacing.lg,
       title: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (eyebrow != null && eyebrow!.trim().isNotEmpty) ...[
+          if (!compact && eyebrow != null && eyebrow!.trim().isNotEmpty) ...[
             Text(
               eyebrow!.toUpperCase(),
               maxLines: 1,
@@ -85,36 +85,35 @@ class PromptWiseAppBar extends StatelessWidget implements PreferredSizeWidget {
               style: theme.textTheme.labelSmall?.copyWith(
                 color: theme.colorScheme.primary,
                 fontWeight: FontWeight.w800,
-                letterSpacing: 0.8,
+                letterSpacing: 0.65,
               ),
             ),
-            const SizedBox(height: 2),
+            const SizedBox(height: 1),
           ],
           Text(
             title,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: (veryNarrow
+            style: (compact
                     ? theme.textTheme.titleMedium
-                    : compact
-                        ? theme.textTheme.titleLarge
-                        : theme.textTheme.headlineSmall)
+                    : theme.textTheme.titleLarge)
                 ?.copyWith(
               color: theme.colorScheme.onSurface,
+              fontSize: compact ? 18 : null,
               fontWeight: FontWeight.w800,
-              letterSpacing: -0.45,
-              height: 1.05,
+              letterSpacing: -0.35,
+              height: 1.08,
             ),
           ),
           if (!compact && subtitle != null && subtitle!.trim().isNotEmpty) ...[
-            const SizedBox(height: 3),
+            const SizedBox(height: 2),
             Text(
               subtitle!,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
-                height: 1.2,
+                height: 1.1,
               ),
             ),
           ],
@@ -122,23 +121,13 @@ class PromptWiseAppBar extends StatelessWidget implements PreferredSizeWidget {
       ),
       actions: [
         ...actions,
-        SizedBox(width: compact ? AppSpacing.sm : AppSpacing.lg),
+        SizedBox(width: compact ? AppSpacing.sm : AppSpacing.md),
       ],
       bottom: PreferredSize(
         preferredSize: const Size.fromHeight(1),
         child: Container(
           height: 1,
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: [
-                Colors.transparent,
-                theme.colorScheme.outlineVariant.withValues(alpha: 0.7),
-                theme.colorScheme.primary.withValues(alpha: 0.22),
-                theme.colorScheme.outlineVariant.withValues(alpha: 0.7),
-                Colors.transparent,
-              ],
-            ),
-          ),
+          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.48),
         ),
       ),
     );
@@ -162,16 +151,16 @@ class PromptWiseHeaderIconButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
+      padding: const EdgeInsets.symmetric(vertical: 8),
       child: _MotionCircleButton(
         tooltip: tooltip,
         onPressed: loading ? null : onPressed,
         child: loading
             ? const SizedBox.square(
-                dimension: 18,
+                dimension: 16,
                 child: CircularProgressIndicator(strokeWidth: 2),
               )
-            : Icon(icon, size: 20),
+            : Icon(icon, size: 19),
       ),
     );
   }
@@ -194,10 +183,7 @@ class _PromptWiseBackButton extends StatelessWidget {
       child: _MotionCircleButton(
         tooltip: tooltip,
         onPressed: onPressed,
-        child: const Icon(
-          Icons.arrow_back_ios_new_rounded,
-          size: 18,
-        ),
+        child: const Icon(Icons.arrow_back_ios_new_rounded, size: 16),
       ),
     );
   }
@@ -230,9 +216,9 @@ class _MotionCircleButtonState extends State<_MotionCircleButton> {
     final scale = !animate
         ? 1.0
         : _pressed
-            ? 0.92
+            ? 0.93
             : _hovered
-                ? 1.045
+                ? 1.03
                 : 1.0;
 
     return Tooltip(
@@ -251,14 +237,12 @@ class _MotionCircleButtonState extends State<_MotionCircleButton> {
           duration: AppMotion.duration(context, AppMotion.fast),
           curve: AppMotion.standardCurve,
           child: Material(
-            color: theme.colorScheme.surfaceContainerHighest.withValues(
-              alpha: _hovered ? 0.94 : 0.76,
+            color: theme.colorScheme.surface.withValues(
+              alpha: _hovered ? 0.90 : 0.62,
             ),
             shape: CircleBorder(
               side: BorderSide(
-                color: _hovered
-                    ? theme.colorScheme.primary.withValues(alpha: 0.25)
-                    : theme.colorScheme.outlineVariant.withValues(alpha: 0.8),
+                color: theme.colorScheme.outlineVariant.withValues(alpha: 0.68),
               ),
             ),
             clipBehavior: Clip.antiAlias,
@@ -267,14 +251,12 @@ class _MotionCircleButtonState extends State<_MotionCircleButton> {
               onTap: widget.onPressed,
               onHighlightChanged: enabled
                   ? (value) {
-                      if (_pressed == value) {
-                        return;
-                      }
+                      if (_pressed == value) return;
                       setState(() => _pressed = value);
                     }
                   : null,
               child: SizedBox.square(
-                dimension: 44,
+                dimension: 38,
                 child: Center(child: widget.child),
               ),
             ),

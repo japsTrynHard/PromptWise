@@ -81,12 +81,13 @@ class _AdaptiveLearningScreenState extends State<AdaptiveLearningScreen> {
                 padding: AdaptiveLayout.pageInsets(context),
                 sliver: SliverList(
                   delegate: SliverChildListDelegate([
-                    const PageIntro(
-                      eyebrow: 'Learning path',
-                      title: 'Your learning path',
-                      description:
-                          'PromptWise uses your starting check and recent practice to show what to focus on next.',
-                    ),
+                    if (!AdaptiveLayout.isPhone(context))
+                      const PageIntro(
+                        eyebrow: 'Learning path',
+                        title: 'Your learning path',
+                        description:
+                            'PromptWise uses your starting check and recent practice to show what to focus on next.',
+                      ),
                     if (adaptive.errorMessage != null) ...[
                       const SizedBox(height: AppSpacing.lg),
                       AppCard(

@@ -187,13 +187,16 @@ class _SandboxScreenState extends State<SandboxScreen> {
                   ),
                   sliver: SliverList(
                     delegate: SliverChildListDelegate([
-                      PageIntro(
-                        title: 'Build better prompts by revising them yourself',
-                        description:
-                            'PromptWise scores the same eight prompt skills every time, asks guiding questions, and tracks your improvement. AI Coach adds contextual guidance but never rewrites the prompt or completes the task for you.',
-                        trailing: _RankBadge(label: progression.overallRankLabel),
-                      ),
-                      const SizedBox(height: AppSpacing.xl),
+                      if (!AdaptiveLayout.isPhone(context)) ...[
+                        PageIntro(
+                          title: 'Build better prompts by revising them yourself',
+                          description:
+                              'PromptWise scores the same eight prompt skills every time, asks guiding questions, and tracks your improvement. AI Coach adds contextual guidance but never rewrites the prompt or completes the task for you.',
+                          trailing:
+                              _RankBadge(label: progression.overallRankLabel),
+                        ),
+                        const SizedBox(height: AppSpacing.xl),
+                      ],
                       _CoachModeSelector(state: state),
                       const SizedBox(height: AppSpacing.md),
                       _LearningContextCard(

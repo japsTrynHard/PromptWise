@@ -4,7 +4,7 @@ import '../../core/utils/constants.dart';
 
 class AppCard extends StatefulWidget {
   final Widget child;
-  final EdgeInsetsGeometry padding;
+  final EdgeInsetsGeometry? padding;
   final VoidCallback? onTap;
   final Color? backgroundColor;
   final BorderSide? border;
@@ -13,7 +13,7 @@ class AppCard extends StatefulWidget {
   const AppCard({
     super.key,
     required this.child,
-    this.padding = const EdgeInsets.all(AppSpacing.xl),
+    this.padding,
     this.onTap,
     this.backgroundColor,
     this.border,
@@ -51,13 +51,18 @@ class _AppCardState extends State<AppCard> {
         widget.animateOnTap &&
         AppMotion.animationsEnabled(context);
 
+    final compact = MediaQuery.sizeOf(context).shortestSide < AppBreakpoints.compact;
+    final radius = compact ? 18.0 : AppRadius.lg;
+    final resolvedPadding = widget.padding ??
+        EdgeInsets.all(compact ? AppSpacing.lg : AppSpacing.xl);
+
     final shape = RoundedRectangleBorder(
-      borderRadius: BorderRadius.circular(AppRadius.lg),
+      borderRadius: BorderRadius.circular(radius),
       side: widget.border ?? BorderSide(color: theme.colorScheme.outlineVariant),
     );
 
     final content = Padding(
-      padding: widget.padding,
+      padding: resolvedPadding,
       child: widget.child,
     );
 
@@ -102,7 +107,7 @@ class _AppCardState extends State<AppCard> {
           curve: AppMotion.standardCurve,
           transform: Matrix4.translationValues(0, hoverLift ? -2 : 0, 0),
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(AppRadius.lg),
+            borderRadius: BorderRadius.circular(radius),
             boxShadow: [
               BoxShadow(
                 color: Colors.black.withValues(

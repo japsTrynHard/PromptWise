@@ -19,56 +19,58 @@ class SectionHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final action = actionLabel != null && onAction != null
-        ? TextButton(onPressed: onAction, child: Text(actionLabel!))
-        : null;
+    final compact = MediaQuery.sizeOf(context).shortestSide < AppBreakpoints.compact;
 
-    final copy = Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.end,
       children: [
-        Text(
-          title,
-          style: theme.textTheme.titleLarge?.copyWith(
-            fontWeight: FontWeight.w800,
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: (compact
+                        ? theme.textTheme.titleMedium
+                        : theme.textTheme.titleLarge)
+                    ?.copyWith(
+                  fontSize: compact ? 17.5 : null,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: compact ? -0.2 : null,
+                ),
+              ),
+              if (subtitle != null && subtitle!.trim().isNotEmpty) ...[
+                SizedBox(height: compact ? 3 : AppSpacing.xs),
+                Text(
+                  subtitle!,
+                  style: (compact
+                          ? theme.textTheme.bodySmall
+                          : theme.textTheme.bodyMedium)
+                      ?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                    fontSize: compact ? 13 : null,
+                    height: compact ? 1.35 : null,
+                  ),
+                ),
+              ],
+            ],
           ),
         ),
-        if (subtitle != null) ...[
-          const SizedBox(height: AppSpacing.xs),
-          Text(
-            subtitle!,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-              height: 1.4,
-            ),
+        if (actionLabel != null && onAction != null) ...[
+          const SizedBox(width: AppSpacing.md),
+          TextButton(
+            onPressed: onAction,
+            style: compact
+                ? TextButton.styleFrom(
+                    minimumSize: const Size(0, 36),
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    visualDensity: VisualDensity.compact,
+                  )
+                : null,
+            child: Text(actionLabel!),
           ),
         ],
       ],
-    );
-
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        if (action == null) return copy;
-
-        if (constraints.maxWidth < 520) {
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              copy,
-              const SizedBox(height: AppSpacing.xs),
-              Align(alignment: Alignment.centerLeft, child: action),
-            ],
-          );
-        }
-
-        return Row(
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            Expanded(child: copy),
-            const SizedBox(width: AppSpacing.md),
-            action,
-          ],
-        );
-      },
     );
   }
 }

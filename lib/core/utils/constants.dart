@@ -47,11 +47,11 @@ class AppMotion {
 
   // Fast enough to feel immediate, but long enough to make state changes clear.
   // These durations are shared by navigation, cards, buttons, and theme changes.
-  static const Duration micro = Duration(milliseconds: 90);
-  static const Duration fast = Duration(milliseconds: 150);
-  static const Duration normal = Duration(milliseconds: 210);
-  static const Duration page = Duration(milliseconds: 240);
-  static const Duration slow = Duration(milliseconds: 320);
+  static const Duration micro = Duration(milliseconds: 80);
+  static const Duration fast = Duration(milliseconds: 130);
+  static const Duration normal = Duration(milliseconds: 180);
+  static const Duration page = Duration(milliseconds: 230);
+  static const Duration slow = Duration(milliseconds: 280);
 
   static const Curve standardCurve = Curves.easeOutCubic;
   static const Curve emphasizedCurve = Curves.easeOutQuart;

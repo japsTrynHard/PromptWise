@@ -22,54 +22,50 @@ class AdaptiveLayout {
     return sizeOf(context) == AppWindowSize.compact;
   }
 
-  static bool isNarrowPhone(BuildContext context) {
-    return MediaQuery.sizeOf(context).width < 360;
-  }
-
-  /// Uses shortestSide so a phone in landscape is still treated as a phone.
-  static bool isPhoneFormFactor(BuildContext context) {
-    return MediaQuery.sizeOf(context).shortestSide < 600;
-  }
-
-  static bool isTabletFormFactor(BuildContext context) {
-    final size = MediaQuery.sizeOf(context);
-    return size.shortestSide >= 600 && size.width < AppBreakpoints.desktop;
+  static bool isPhone(BuildContext context) {
+    return MediaQuery.sizeOf(context).shortestSide < AppBreakpoints.compact;
   }
 
   static bool isAtLeastTablet(BuildContext context) {
-    return MediaQuery.sizeOf(context).shortestSide >= 600;
-  }
-
-  /// Navigation rail should not appear just because an iPhone is rotated.
-  /// Tablets can use a rail from 720 logical pixels; wide desktop windows
-  /// always use it.
-  static bool prefersRailNavigation(
-    BuildContext context, {
-    required double availableWidth,
-  }) {
-    if (availableWidth >= AppBreakpoints.desktop) {
-      return true;
-    }
-
-    return MediaQuery.sizeOf(context).shortestSide >= 600 &&
-        availableWidth >= 720;
+    return MediaQuery.sizeOf(context).width >= AppBreakpoints.tablet;
   }
 
   static double horizontalPaddingFor(double width) {
-    if (width < 340) return AppSpacing.md;
-    if (width < 430) return AppSpacing.lg;
-    if (width < AppBreakpoints.compact) return AppSpacing.xl;
+    if (width < 360) return AppSpacing.md;
+    if (width < AppBreakpoints.compact) return AppSpacing.lg;
     if (width < AppBreakpoints.tablet) return AppSpacing.xxl;
     return AppSpacing.section;
   }
 
   static EdgeInsets pageInsets(
     BuildContext context, {
-    double top = AppSpacing.page,
+    double? top,
     double bottom = AppSpacing.section,
   }) {
-    final horizontal = horizontalPaddingFor(MediaQuery.sizeOf(context).width);
-    return EdgeInsets.fromLTRB(horizontal, top, horizontal, bottom);
+    final size = MediaQuery.sizeOf(context);
+    final width = size.width;
+    final phone = size.shortestSide < AppBreakpoints.compact;
+    final horizontal = phone
+        ? (width < 360 ? AppSpacing.md : AppSpacing.lg)
+        : horizontalPaddingFor(width);
+    final resolvedTop = top ?? (phone ? AppSpacing.lg : AppSpacing.page);
+    return EdgeInsets.fromLTRB(horizontal, resolvedTop, horizontal, bottom);
+  }
+
+  /// Insets for the five learner root tabs shown behind the floating mobile
+  /// navigation. The extra bottom room is part of the scrollable content, not
+  /// a fixed navigation platform, so the page can remain visible underneath
+  /// the glass island while the final card can still be scrolled above it.
+  static EdgeInsets rootTabPageInsets(
+    BuildContext context, {
+    double? top,
+  }) {
+    final phone = isPhone(context);
+    return pageInsets(
+      context,
+      top: top ?? (phone ? AppSpacing.lg : AppSpacing.page),
+      bottom: phone ? 112 : AppSpacing.section,
+    );
   }
 
   static int gridColumns(
@@ -104,15 +100,15 @@ class AdaptiveBody extends StatelessWidget {
   Widget build(BuildContext context) {
     Widget result = LayoutBuilder(
       builder: (context, constraints) {
-        final boundedWidth = constraints.maxWidth.isFinite
-            ? constraints.maxWidth
-            : MediaQuery.sizeOf(context).width;
-        final targetWidth = boundedWidth < maxWidth ? boundedWidth : maxWidth;
-
         return Align(
           alignment: Alignment.topCenter,
-          child: SizedBox(
-            width: targetWidth,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxWidth: maxWidth,
+              minWidth: constraints.maxWidth < maxWidth
+                  ? constraints.maxWidth
+                  : maxWidth,
+            ),
             child: child,
           ),
         );
@@ -120,11 +116,7 @@ class AdaptiveBody extends StatelessWidget {
     );
 
     if (useSafeArea) {
-      result = SafeArea(
-        top: safeTop,
-        bottom: safeBottom,
-        child: result,
-      );
+      result = SafeArea(top: safeTop, bottom: safeBottom, child: result);
     }
 
     return result;

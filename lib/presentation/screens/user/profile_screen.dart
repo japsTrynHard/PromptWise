@@ -25,24 +25,19 @@ class ProfileScreen extends StatelessWidget {
     final progress = progressController.progress;
 
     return AdaptiveBody(
+      safeTop: false,
+      safeBottom: false,
       child: CustomScrollView(
         slivers: [
           SliverPadding(
-            padding: AdaptiveLayout.pageInsets(context),
+            padding: AdaptiveLayout.rootTabPageInsets(context),
             sliver: SliverList(
               delegate: SliverChildListDelegate([
-                PageIntro(
+                const PageIntro(
                   eyebrow: 'You',
                   title: 'Your profile',
                   description:
-                      'Review your account, saved progress, achievements, and appearance settings.',
-                  trailing: IconButton.filledTonal(
-                    tooltip: 'Sign out',
-                    onPressed: auth.isLoading
-                        ? null
-                        : () => _signOut(context, auth),
-                    icon: const Icon(Icons.logout_rounded),
-                  ),
+                      'Review your account, progress, achievements, and appearance settings.',
                 ),
                 const SizedBox(height: AppSpacing.lg),
                 const SyncStatusBanner(),

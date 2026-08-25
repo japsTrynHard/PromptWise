@@ -83,8 +83,8 @@ class _LessonDetailScreenState extends State<LessonDetailScreen> {
     return Scaffold(
       appBar: PromptWiseAppBar(
         eyebrow: 'LEARN · LESSON',
-        title: topicLabel,
-        subtitle: lesson.title,
+        title: lesson.title,
+        subtitle: topicLabel,
         backTooltip: 'Back to lessons',
       ),
       body: AdaptiveBody(

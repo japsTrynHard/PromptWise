@@ -83,13 +83,15 @@ class _LearnScreenState extends State<LearnScreen> {
         .toList(growable: false);
 
     return AdaptiveBody(
+      safeTop: false,
+      safeBottom: false,
       child: RefreshIndicator(
         onRefresh: content.refresh,
         child: CustomScrollView(
           physics: const AlwaysScrollableScrollPhysics(),
           slivers: [
             SliverPadding(
-              padding: AdaptiveLayout.pageInsets(context),
+              padding: AdaptiveLayout.pageInsets(context, bottom: 0),
               sliver: SliverList(
                 delegate: SliverChildListDelegate([
                   const PageIntro(
@@ -207,7 +209,7 @@ class _LearnScreenState extends State<LearnScreen> {
               )
             else
               SliverPadding(
-                padding: AdaptiveLayout.pageInsets(context, top: 0),
+                padding: AdaptiveLayout.rootTabPageInsets(context, top: 0),
                 sliver: SliverLayoutBuilder(
                   builder: (context, constraints) {
                     final width = constraints.crossAxisExtent;

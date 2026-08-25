@@ -77,6 +77,8 @@ class _VerifyScreenState extends State<VerifyScreen> {
     final weakest = verification.weakestSubskill;
 
     return AdaptiveBody(
+      safeTop: false,
+      safeBottom: false,
       child: RefreshIndicator(
         onRefresh: () async {
           await Future.wait([content.refresh(), verification.refresh()]);
@@ -85,7 +87,7 @@ class _VerifyScreenState extends State<VerifyScreen> {
           physics: const AlwaysScrollableScrollPhysics(),
           slivers: [
             SliverPadding(
-              padding: AdaptiveLayout.pageInsets(context),
+              padding: AdaptiveLayout.rootTabPageInsets(context),
               sliver: SliverList(
                 delegate: SliverChildListDelegate([
                   const PageIntro(
@@ -183,46 +185,34 @@ class _ImageCompareFeature extends StatelessWidget {
       backgroundColor: theme.colorScheme.primaryContainer.withValues(alpha: 0.5),
       child: LayoutBuilder(
         builder: (context, constraints) {
-          final titleRow = Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(AppSpacing.sm),
-                decoration: BoxDecoration(
-                  color: theme.colorScheme.primary.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(AppRadius.md),
-                ),
-                child: Icon(
-                  Icons.image_search_rounded,
-                  color: theme.colorScheme.primary,
-                ),
-              ),
-              const SizedBox(width: AppSpacing.md),
-              Expanded(
-                child: Text(
-                  'Compare Images',
-                  style: theme.textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-            ],
-          );
-
           final text = Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              if (constraints.maxWidth < 430) ...[
-                titleRow,
-                const SizedBox(height: AppSpacing.sm),
-                const Chip(label: Text('Fresh online images')),
-              ] else
-                Row(
-                  children: [
-                    Expanded(child: titleRow),
-                    const SizedBox(width: AppSpacing.sm),
-                    const Chip(label: Text('Fresh online images')),
-                  ],
-                ),
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(AppSpacing.sm),
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.primary.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(AppRadius.md),
+                    ),
+                    child: Icon(
+                      Icons.image_search_rounded,
+                      color: theme.colorScheme.primary,
+                    ),
+                  ),
+                  const SizedBox(width: AppSpacing.md),
+                  Expanded(
+                    child: Text(
+                      'Compare Images',
+                      style: theme.textTheme.headlineSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  const Chip(label: Text('Fresh online images')),
+                ],
+              ),
               const SizedBox(height: AppSpacing.md),
               Text(
                 'Pick which image was marked as AI-made. The examples are pulled from online source information, so the set can change instead of repeating the same pictures every time.',
@@ -348,46 +338,29 @@ class _FriendlyProgressCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return AppCard(
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final title = Text(
-            attempts == 0
-                ? 'You are just getting started'
-                : '$average% overall progress',
-            style: theme.textTheme.titleLarge?.copyWith(
-              fontWeight: FontWeight.w700,
-            ),
-          );
-          final attemptsText = Text(
-            '$attempts practice ${attempts == 1 ? 'answer' : 'answers'}',
-          );
-
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
             children: [
-              if (constraints.maxWidth < 430) ...[
-                title,
-                const SizedBox(height: AppSpacing.xs),
-                attemptsText,
-              ] else
-                Row(
-                  children: [
-                    Expanded(child: title),
-                    const SizedBox(width: AppSpacing.sm),
-                    attemptsText,
-                  ],
+              Expanded(
+                child: Text(
+                  attempts == 0 ? 'You are just getting started' : '$average% overall progress',
+                  style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
                 ),
+              ),
+              Text('$attempts practice ${attempts == 1 ? 'answer' : 'answers'}'),
+            ],
+          ),
           const SizedBox(height: AppSpacing.md),
           LinearProgressIndicator(value: attempts == 0 ? 0 : average / 100),
           const SizedBox(height: AppSpacing.md),
-              Text(
-                attempts == 0
-                    ? 'Try Compare Images or Quick Check. Your progress will appear here as you practice.'
-                    : 'A useful next focus is “${focus.learnerLabel}”. PromptWise will bring that kind of practice back more often.',
-              ),
-            ],
-          );
-        },
+          Text(
+            attempts == 0
+                ? 'Try Compare Images or Quick Check. Your progress will appear here as you practice.'
+                : 'A useful next focus is “${focus.learnerLabel}”. PromptWise will bring that kind of practice back more often.',
+          ),
+        ],
       ),
     );
   }

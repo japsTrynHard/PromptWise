@@ -16,16 +16,17 @@ class GlassNavDestination {
   });
 }
 
-/// Floating learner navigation for compact screens.
+/// True overlay navigation for learner root tabs.
 ///
-/// The control is designed to sit above page content like a floating glass
-/// island. It should be overlaid in a [Stack] instead of occupying layout
-/// space like a traditional bottom navigation bar.
+/// This widget owns only the glass island itself. It does not create a bottom
+/// bar surface or reserve page height. The dashboard positions it over the
+/// scrolling page using a Stack.
 class FloatingGlassNavigation extends StatelessWidget {
   final int selectedIndex;
   final List<GlassNavDestination> destinations;
   final ValueChanged<int> onSelected;
   final bool showSelectedLabel;
+  final bool minimized;
 
   const FloatingGlassNavigation({
     super.key,
@@ -33,6 +34,7 @@ class FloatingGlassNavigation extends StatelessWidget {
     required this.destinations,
     required this.onSelected,
     this.showSelectedLabel = false,
+    this.minimized = false,
   });
 
   @override
@@ -40,61 +42,72 @@ class FloatingGlassNavigation extends StatelessWidget {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final bottomInset = MediaQuery.viewPaddingOf(context).bottom;
+    final duration = AppMotion.duration(context, AppMotion.normal);
 
     return IgnorePointer(
       ignoring: destinations.isEmpty,
-      child: Padding(
+      child: AnimatedPadding(
+        duration: duration,
+        curve: AppMotion.standardCurve,
         padding: EdgeInsets.fromLTRB(
-          AppSpacing.lg,
-          AppSpacing.sm,
-          AppSpacing.lg,
-          bottomInset > 0 ? 10 : 18,
+          minimized ? 30 : 16,
+          6,
+          minimized ? 30 : 16,
+          bottomInset > 0 ? 9 : 16,
         ),
         child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 560),
-            child: RepaintBoundary(
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(34),
-                child: BackdropFilter(
-                  filter: ImageFilter.blur(sigmaX: 22, sigmaY: 22),
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      color: (isDark ? const Color(0xFF0F172A) : Colors.white)
-                          .withValues(alpha: isDark ? 0.78 : 0.72),
-                      borderRadius: BorderRadius.circular(34),
-                      border: Border.all(
-                        color: theme.colorScheme.outlineVariant.withValues(
-                          alpha: isDark ? 0.52 : 0.82,
-                        ),
-                      ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withValues(
-                            alpha: isDark ? 0.24 : 0.1,
+          child: AnimatedScale(
+            scale: minimized ? 0.94 : 1,
+            duration: duration,
+            curve: AppMotion.standardCurve,
+            child: ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: minimized ? 510 : 560),
+              child: RepaintBoundary(
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(32),
+                  child: BackdropFilter(
+                    filter: ImageFilter.blur(sigmaX: 19, sigmaY: 19),
+                    child: AnimatedContainer(
+                      duration: duration,
+                      curve: AppMotion.standardCurve,
+                      height: minimized ? 56 : 64,
+                      padding: EdgeInsets.all(minimized ? 5 : 6),
+                      decoration: BoxDecoration(
+                        color: (isDark
+                                ? const Color(0xFF0F172A)
+                                : Colors.white)
+                            .withValues(alpha: isDark ? 0.74 : 0.70),
+                        borderRadius: BorderRadius.circular(32),
+                        border: Border.all(
+                          color: theme.colorScheme.outlineVariant.withValues(
+                            alpha: isDark ? 0.44 : 0.72,
                           ),
-                          blurRadius: 32,
-                          offset: const Offset(0, 14),
                         ),
-                      ],
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.all(7),
-                      child: SizedBox(
-                        height: 58,
-                        child: Row(
-                          children: [
-                            for (var index = 0; index < destinations.length; index++)
-                              Expanded(
-                                child: _GlassDestinationButton(
-                                  destination: destinations[index],
-                                  selected: selectedIndex == index,
-                                  showLabel: showSelectedLabel,
-                                  onTap: () => onSelected(index),
-                                ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(
+                              alpha: isDark ? 0.20 : 0.085,
+                            ),
+                            blurRadius: minimized ? 21 : 27,
+                            offset: Offset(0, minimized ? 9 : 12),
+                          ),
+                        ],
+                      ),
+                      child: Row(
+                        children: [
+                          for (var index = 0;
+                              index < destinations.length;
+                              index++)
+                            Expanded(
+                              child: _GlassDestinationButton(
+                                destination: destinations[index],
+                                selected: selectedIndex == index,
+                                compact: minimized,
+                                showLabel: showSelectedLabel && !minimized,
+                                onTap: () => onSelected(index),
                               ),
-                          ],
-                        ),
+                            ),
+                        ],
                       ),
                     ),
                   ),
@@ -111,12 +124,14 @@ class FloatingGlassNavigation extends StatelessWidget {
 class _GlassDestinationButton extends StatefulWidget {
   final GlassNavDestination destination;
   final bool selected;
+  final bool compact;
   final bool showLabel;
   final VoidCallback onTap;
 
   const _GlassDestinationButton({
     required this.destination,
     required this.selected,
+    required this.compact,
     required this.showLabel,
     required this.onTap,
   });
@@ -138,9 +153,9 @@ class _GlassDestinationButtonState extends State<_GlassDestinationButton> {
     final scale = !animate
         ? 1.0
         : _pressed
-            ? 0.96
+            ? 0.94
             : _hovered
-                ? 1.015
+                ? 1.02
                 : 1.0;
 
     return MouseRegion(
@@ -162,7 +177,7 @@ class _GlassDestinationButtonState extends State<_GlassDestinationButton> {
             label: widget.destination.label,
             child: Tooltip(
               message: widget.destination.label,
-              waitDuration: const Duration(milliseconds: 500),
+              waitDuration: const Duration(milliseconds: 450),
               child: Material(
                 color: Colors.transparent,
                 borderRadius: BorderRadius.circular(AppRadius.pill),
@@ -178,28 +193,18 @@ class _GlassDestinationButtonState extends State<_GlassDestinationButton> {
                     duration: AppMotion.duration(context, AppMotion.normal),
                     curve: AppMotion.standardCurve,
                     padding: EdgeInsets.symmetric(
-                      horizontal: widget.showLabel && widget.selected ? 12 : 8,
+                      horizontal: widget.showLabel && widget.selected ? 10 : 6,
                     ),
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(AppRadius.pill),
-                      gradient: widget.selected
-                          ? LinearGradient(
-                              colors: [
-                                primary.withValues(alpha: 0.16),
-                                AppColors.violet.withValues(alpha: 0.1),
-                              ],
-                            )
+                      color: widget.selected
+                          ? primary.withValues(alpha: 0.10)
                           : _hovered
-                              ? LinearGradient(
-                                  colors: [
-                                    primary.withValues(alpha: 0.045),
-                                    primary.withValues(alpha: 0.02),
-                                  ],
-                                )
-                              : null,
+                              ? primary.withValues(alpha: 0.035)
+                              : Colors.transparent,
                       border: widget.selected
                           ? Border.all(
-                              color: primary.withValues(alpha: 0.17),
+                              color: primary.withValues(alpha: 0.12),
                             )
                           : null,
                     ),
@@ -207,17 +212,23 @@ class _GlassDestinationButtonState extends State<_GlassDestinationButton> {
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Icon(
-                            widget.selected
-                                ? widget.destination.selectedIcon
-                                : widget.destination.icon,
-                            size: 24,
-                            color: widget.selected
-                                ? primary
-                                : theme.colorScheme.onSurfaceVariant,
+                          AnimatedScale(
+                            scale: widget.selected ? 1.04 : 1,
+                            duration:
+                                AppMotion.duration(context, AppMotion.fast),
+                            curve: AppMotion.standardCurve,
+                            child: Icon(
+                              widget.selected
+                                  ? widget.destination.selectedIcon
+                                  : widget.destination.icon,
+                              size: widget.compact ? 20 : 23,
+                              color: widget.selected
+                                  ? primary
+                                  : theme.colorScheme.onSurfaceVariant,
+                            ),
                           ),
                           if (widget.showLabel && widget.selected) ...[
-                            const SizedBox(width: 7),
+                            const SizedBox(width: 6),
                             Flexible(
                               child: Text(
                                 widget.destination.label,

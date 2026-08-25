@@ -42,14 +42,15 @@ class HomeScreen extends StatelessWidget {
       adaptive,
     );
 
-    final compact = MediaQuery.sizeOf(context).width < AppBreakpoints.tablet;
+    final compact = AdaptiveLayout.isPhone(context);
 
     return AdaptiveBody(
+      safeTop: false,
+      safeBottom: false,
       child: SingleChildScrollView(
-        padding: AdaptiveLayout.pageInsets(
+        padding: AdaptiveLayout.rootTabPageInsets(
           context,
           top: compact ? AppSpacing.lg : AppSpacing.page,
-          bottom: AppSpacing.section,
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -542,62 +543,21 @@ class _CompactHomeHero extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Container(
-          padding: const EdgeInsets.symmetric(
-            horizontal: AppSpacing.md,
-            vertical: AppSpacing.sm,
-          ),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(AppRadius.pill),
-            gradient: LinearGradient(
-              colors: [
-                AppColors.primary.withValues(alpha: 0.1),
-                AppColors.teal.withValues(alpha: 0.07),
-              ],
-            ),
-            border: Border.all(
-              color: theme.colorScheme.primary.withValues(alpha: 0.12),
-            ),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 8,
-                height: 8,
-                decoration: const BoxDecoration(
-                  shape: BoxShape.circle,
-                  gradient: LinearGradient(
-                    colors: [AppColors.primary, AppColors.teal],
-                  ),
-                ),
-              ),
-              const SizedBox(width: AppSpacing.sm),
-              Text(
-                'HOME',
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: theme.colorScheme.primary,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: 0.85,
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: AppSpacing.lg),
         Text(
           'Welcome back, $firstName',
-          style: theme.textTheme.headlineSmall?.copyWith(
+          style: theme.textTheme.titleLarge?.copyWith(
+            fontSize: 23,
             fontWeight: FontWeight.w900,
-            letterSpacing: -0.9,
+            letterSpacing: -0.7,
           ),
         ),
-        const SizedBox(height: AppSpacing.sm),
+        const SizedBox(height: 5),
         Text(
-          'Continue where you left off, check your progress, and stay updated with AI.',
-          style: theme.textTheme.bodyMedium?.copyWith(
+          'Continue where you left off and see what is new with AI.',
+          style: theme.textTheme.bodySmall?.copyWith(
             color: theme.colorScheme.onSurfaceVariant,
-            height: 1.45,
+            fontSize: 13.5,
+            height: 1.4,
           ),
         ),
       ],

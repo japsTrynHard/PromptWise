@@ -13,7 +13,7 @@ class AppTheme {
 
   static ThemeData _build(Brightness brightness) {
     final isDark = brightness == Brightness.dark;
-    final background = isDark ? const Color(0xFF080D18) : const Color(0xFFF7F8FC);
+    final background = isDark ? const Color(0xFF080D18) : const Color(0xFFFAFAFC);
     final cardColor = isDark ? const Color(0xFF111827) : const Color(0xFFFFFFFF);
     final borderColor = isDark
         ? const Color(0xFF263348)
@@ -56,8 +56,8 @@ class AppTheme {
       titleMedium: baseTextTheme.titleMedium?.copyWith(
         fontWeight: FontWeight.w600,
       ),
-      bodyLarge: baseTextTheme.bodyLarge?.copyWith(height: 1.52),
-      bodyMedium: baseTextTheme.bodyMedium?.copyWith(height: 1.46),
+      bodyLarge: baseTextTheme.bodyLarge?.copyWith(height: 1.46),
+      bodyMedium: baseTextTheme.bodyMedium?.copyWith(height: 1.42),
       labelLarge: baseTextTheme.labelLarge?.copyWith(
         fontWeight: FontWeight.w700,
       ),
@@ -88,6 +88,7 @@ class AppTheme {
       ),
       appBarTheme: AppBarTheme(
         centerTitle: false,
+        toolbarHeight: 56,
         backgroundColor: background,
         foregroundColor: colorScheme.onSurface,
         surfaceTintColor: Colors.transparent,
@@ -270,12 +271,12 @@ class _PromptWisePageTransitionsBuilder extends PageTransitionsBuilder {
     );
 
     final fade = Tween<double>(
-      begin: appleStyle ? 0.94 : 0.90,
+      begin: appleStyle ? 0.97 : 0.95,
       end: 1,
     ).animate(curved);
 
     final slide = Tween<Offset>(
-      begin: appleStyle ? const Offset(0.055, 0) : const Offset(0.018, 0.010),
+      begin: appleStyle ? const Offset(0.035, 0) : const Offset(0.010, 0.006),
       end: Offset.zero,
     ).animate(curved);
 

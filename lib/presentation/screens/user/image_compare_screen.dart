@@ -9,6 +9,7 @@ import '../../controllers/adaptive_learning_controller.dart';
 import '../../controllers/image_comparison_controller.dart';
 import '../../controllers/progress_controller.dart';
 import '../../widgets/adaptive_layout.dart';
+import '../../widgets/promptwise_app_bar.dart';
 import '../../widgets/app_card.dart';
 import '../../widgets/state_message.dart';
 import '../../../core/utils/constants.dart';
@@ -176,144 +177,35 @@ class _ImageCompareScreenState extends State<ImageCompareScreen> {
 
     final theme = Theme.of(context);
 
-    final compact = AdaptiveLayout.isCompact(context);
 
     return Scaffold(
-      appBar: AppBar(
-        automaticallyImplyLeading: false,
-
-        toolbarHeight: compact ? 76 : 88,
-
-        elevation: 0,
-        scrolledUnderElevation: 0,
-
-        surfaceTintColor: Colors.transparent,
-
-        backgroundColor: theme.colorScheme.surface.withValues(alpha: 0.96),
-
-        leadingWidth: compact ? 68 : 78,
-
-        leading: Padding(
-          padding: EdgeInsets.only(
-            left: compact ? AppSpacing.md : AppSpacing.xl,
-            top: AppSpacing.sm,
-            bottom: AppSpacing.sm,
-          ),
-          child: Tooltip(
-            message: 'Back to Verify',
-            child: Material(
-              color: theme.colorScheme.surfaceContainerHighest,
-
-              shape: const CircleBorder(),
-
-              child: InkWell(
-                customBorder: const CircleBorder(),
-
-                onTap: () => Navigator.maybePop(context),
-
-                child: const Icon(Icons.arrow_back_ios_new_rounded, size: 19),
-              ),
-            ),
-          ),
-        ),
-
-        titleSpacing: AppSpacing.sm,
-
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-
-          mainAxisSize: MainAxisSize.min,
-
-          children: [
-            Text(
-              'VERIFY · IMAGE CHALLENGE',
-
-              maxLines: 1,
-
-              overflow: TextOverflow.ellipsis,
-
-              style: theme.textTheme.labelSmall?.copyWith(
-                color: theme.colorScheme.primary,
-
-                fontWeight: FontWeight.w800,
-
-                letterSpacing: 0.8,
-              ),
-            ),
-
-            const SizedBox(height: 2),
-
-            Text(
-              'Compare Images',
-
-              maxLines: 1,
-
-              overflow: TextOverflow.ellipsis,
-
-              style:
-                  (compact
-                          ? theme.textTheme.titleLarge
-                          : theme.textTheme.headlineSmall)
-                      ?.copyWith(
-                        fontWeight: FontWeight.w800,
-
-                        letterSpacing: -0.4,
-                      ),
-            ),
-
-            if (!compact)
-              Text(
-                'Guess first, then check what the original source says.',
-
-                maxLines: 1,
-
-                overflow: TextOverflow.ellipsis,
-
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
-              ),
-          ],
-        ),
-
+      appBar: PromptWiseAppBar(
+        eyebrow: 'Verify',
+        title: 'Compare Images',
+        subtitle: 'Guess first, then check what the original source says.',
+        backTooltip: 'Back to Verify',
         actions: [
-          Container(
-            margin: EdgeInsets.only(
-              right: compact ? AppSpacing.md : AppSpacing.xl,
-            ),
-
-            padding: const EdgeInsets.symmetric(
-              horizontal: AppSpacing.md,
-              vertical: AppSpacing.sm,
-            ),
-
-            decoration: BoxDecoration(
-              color: theme.colorScheme.primaryContainer,
-
-              borderRadius: BorderRadius.circular(AppRadius.pill),
-            ),
-
-            child: Text(
-              '$_score / ${rounds.isEmpty ? 5 : rounds.length}',
-
-              style: theme.textTheme.labelLarge?.copyWith(
-                color: theme.colorScheme.onPrimaryContainer,
-
-                fontWeight: FontWeight.w800,
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.md,
+                vertical: 7,
+              ),
+              decoration: BoxDecoration(
+                color: theme.colorScheme.primaryContainer.withValues(alpha: 0.72),
+                borderRadius: BorderRadius.circular(AppRadius.pill),
+              ),
+              child: Text(
+                '$_score / ${rounds.isEmpty ? 5 : rounds.length}',
+                style: theme.textTheme.labelMedium?.copyWith(
+                  color: theme.colorScheme.onPrimaryContainer,
+                  fontWeight: FontWeight.w800,
+                ),
               ),
             ),
           ),
         ],
-
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(1),
-
-          child: Divider(
-            height: 1,
-
-            color: theme.colorScheme.outlineVariant.withValues(alpha: 0.65),
-          ),
-        ),
       ),
 
       body: controller.isLoading && rounds.isEmpty

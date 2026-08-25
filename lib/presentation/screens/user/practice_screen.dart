@@ -76,13 +76,15 @@ class _PracticeScreenState extends State<PracticeScreen> {
     final focus = adaptive.recommendedTopic ?? adaptive.weakestTopic;
 
     return AdaptiveBody(
+      safeTop: false,
+      safeBottom: false,
       child: RefreshIndicator(
         onRefresh: () => _refresh(context),
         child: CustomScrollView(
           physics: const AlwaysScrollableScrollPhysics(),
           slivers: [
             SliverPadding(
-              padding: AdaptiveLayout.pageInsets(context),
+              padding: AdaptiveLayout.rootTabPageInsets(context),
               sliver: SliverList(
                 delegate: SliverChildListDelegate([
                   const PageIntro(

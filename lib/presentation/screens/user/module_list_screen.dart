@@ -55,25 +55,39 @@ class ModuleListScreen extends StatelessWidget {
                     ),
                     sliver: SliverList(
                       delegate: SliverChildListDelegate([
-                        PageIntro(
-                          title: module.title,
-                          description: module.description,
-                          trailing: Container(
-                            width: 54,
-                            height: 54,
-                            decoration: BoxDecoration(
-                              color: Theme.of(
-                                context,
-                              ).colorScheme.primaryContainer,
-                              borderRadius: BorderRadius.circular(AppRadius.md),
-                            ),
-                            child: Icon(
-                              AppIcons.module(module.icon),
-                              color: Theme.of(context).colorScheme.primary,
+                        if (AdaptiveLayout.isPhone(context)) ...[
+                          Text(
+                            module.description,
+                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .onSurfaceVariant,
+                                  height: 1.4,
+                                ),
+                          ),
+                          const SizedBox(height: AppSpacing.lg),
+                        ] else ...[
+                          PageIntro(
+                            title: module.title,
+                            description: module.description,
+                            trailing: Container(
+                              width: 54,
+                              height: 54,
+                              decoration: BoxDecoration(
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .primaryContainer,
+                                borderRadius:
+                                    BorderRadius.circular(AppRadius.md),
+                              ),
+                              child: Icon(
+                                AppIcons.module(module.icon),
+                                color: Theme.of(context).colorScheme.primary,
+                              ),
                             ),
                           ),
-                        ),
-                        const SizedBox(height: AppSpacing.xxl),
+                          const SizedBox(height: AppSpacing.xxl),
+                        ],
                         AppCard(
                           backgroundColor: Theme.of(context)
                               .colorScheme
