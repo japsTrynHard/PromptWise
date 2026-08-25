@@ -1,10 +1,11 @@
+import 'dart:ui';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../controllers/auth_controller.dart';
 import '../../../core/routes/app_routes.dart';
 import '../../../core/utils/constants.dart';
-import '../../widgets/adaptive_layout.dart';
 import '../../widgets/app_logo.dart';
 import '../../widgets/floating_glass_navigation.dart';
 import './home_screen.dart';
@@ -105,10 +106,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
           reverseCurve: AppMotion.reverseCurve,
         );
         final slide = Tween<Offset>(
-          begin: Offset(0.018 * direction, 0.004),
+          begin: Offset(0.016 * direction, 0.004),
           end: Offset.zero,
         ).animate(curved);
-        final fade = Tween<double>(begin: 0.86, end: 1).animate(curved);
+        final fade = Tween<double>(begin: 0.9, end: 1).animate(curved);
 
         return FadeTransition(
           opacity: fade,
@@ -166,10 +167,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final useRail = AdaptiveLayout.prefersRailNavigation(
-          context,
-          availableWidth: constraints.maxWidth,
-        );
+        final useRail = constraints.maxWidth >= AppBreakpoints.tablet;
         final extendedRail = constraints.maxWidth >= AppBreakpoints.desktop;
         final page = _animatedPage(context);
 
@@ -198,21 +196,48 @@ class _DashboardScreenState extends State<DashboardScreen> {
         }
 
         final bottomInset = MediaQuery.viewPaddingOf(context).bottom;
-        final navHeight = FloatingGlassNavigation.surfaceHeight +
-            bottomInset +
-            AppSpacing.lg;
+        const floatingNavHeight = 74.0;
+        const topHeaderHeight = 76.0;
+        final pageBottomPadding = floatingNavHeight + bottomInset + 18;
+        final pageTopPadding = topHeaderHeight + 8;
+
         return Scaffold(
           extendBody: true,
           body: _LearnerAmbientBackground(
-            child: Padding(
-              padding: EdgeInsets.only(bottom: navHeight),
-              child: page,
+            child: Stack(
+              children: [
+                Positioned.fill(
+                  child: Padding(
+                    padding: EdgeInsets.only(
+                      top: pageTopPadding,
+                      bottom: pageBottomPadding,
+                    ),
+                    child: page,
+                  ),
+                ),
+                Positioned(
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  child: _LearnerMobileTopBar(
+                    displayName: auth.displayName,
+                    isLoading: auth.isLoading,
+                    onSignOut: _signOut,
+                  ),
+                ),
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  child: FloatingGlassNavigation(
+                    selectedIndex: _currentIndex,
+                    destinations: _destinations,
+                    onSelected: _select,
+                    showSelectedLabel: constraints.maxWidth >= 410,
+                  ),
+                ),
+              ],
             ),
-          ),
-          bottomNavigationBar: FloatingGlassNavigation(
-            selectedIndex: _currentIndex,
-            destinations: _destinations,
-            onSelected: _select,
           ),
         );
       },
@@ -240,7 +265,7 @@ class _LearnerAmbientBackground extends StatelessWidget {
                 end: Alignment.bottomRight,
                 colors: isDark
                     ? const [Color(0xFF080D18), Color(0xFF0B1220)]
-                    : const [Color(0xFFFAFBFF), Color(0xFFF5F7FC)],
+                    : const [Color(0xFFFCFCFF), Color(0xFFF7F8FC)],
               ),
             ),
           ),
@@ -250,7 +275,7 @@ class _LearnerAmbientBackground extends StatelessWidget {
           right: -90,
           child: _AmbientOrb(
             size: 310,
-            color: AppColors.violet.withValues(alpha: isDark ? 0.075 : 0.055),
+            color: AppColors.violet.withValues(alpha: isDark ? 0.08 : 0.05),
           ),
         ),
         Positioned(
@@ -258,11 +283,180 @@ class _LearnerAmbientBackground extends StatelessWidget {
           left: -100,
           child: _AmbientOrb(
             size: 350,
-            color: AppColors.teal.withValues(alpha: isDark ? 0.05 : 0.04),
+            color: AppColors.teal.withValues(alpha: isDark ? 0.05 : 0.035),
           ),
         ),
         Positioned.fill(child: child),
       ],
+    );
+  }
+}
+
+class _LearnerMobileTopBar extends StatelessWidget {
+  final String displayName;
+  final bool isLoading;
+  final VoidCallback onSignOut;
+
+  const _LearnerMobileTopBar({
+    required this.displayName,
+    required this.isLoading,
+    required this.onSignOut,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final topInset = MediaQuery.viewPaddingOf(context).top;
+    final isDark = theme.brightness == Brightness.dark;
+
+    return RepaintBoundary(
+      child: ClipRect(
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+          child: Container(
+            padding: EdgeInsets.fromLTRB(
+              AppSpacing.lg,
+              topInset + AppSpacing.sm,
+              AppSpacing.lg,
+              AppSpacing.sm,
+            ),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  theme.scaffoldBackgroundColor.withValues(alpha: isDark ? 0.82 : 0.88),
+                  theme.scaffoldBackgroundColor.withValues(alpha: isDark ? 0.62 : 0.68),
+                ],
+              ),
+              border: Border(
+                bottom: BorderSide(
+                  color: theme.colorScheme.outlineVariant.withValues(alpha: 0.5),
+                ),
+              ),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 34,
+                  height: 34,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(12),
+                    gradient: const LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [
+                        AppColors.primary,
+                        AppColors.violet,
+                        AppColors.teal,
+                      ],
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: AppColors.primary.withValues(alpha: 0.2),
+                        blurRadius: 16,
+                        offset: const Offset(0, 6),
+                      ),
+                    ],
+                  ),
+                  padding: const EdgeInsets.all(5),
+                  child: const FittedBox(
+                    child: AppLogo(size: 28, showWordmark: false),
+                  ),
+                ),
+                const SizedBox(width: AppSpacing.md),
+                Expanded(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      RichText(
+                        text: TextSpan(
+                          style: theme.textTheme.titleLarge?.copyWith(
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: -0.85,
+                            color: theme.colorScheme.onSurface,
+                          ),
+                          children: const [
+                            TextSpan(text: 'Prompt'),
+                            TextSpan(
+                              text: 'Wise',
+                              style: TextStyle(color: AppColors.teal),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Text(
+                        'Hi, ${displayName.split(' ').first}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.labelMedium?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                _TopBarIconButton(
+                  tooltip: 'Sign out',
+                  icon: Icons.logout_rounded,
+                  loading: isLoading,
+                  onPressed: isLoading ? null : onSignOut,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _TopBarIconButton extends StatelessWidget {
+  final String tooltip;
+  final IconData icon;
+  final VoidCallback? onPressed;
+  final bool loading;
+
+  const _TopBarIconButton({
+    required this.tooltip,
+    required this.icon,
+    required this.onPressed,
+    this.loading = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: theme.colorScheme.surface.withValues(alpha: 0.62),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: BorderSide(
+            color: theme.colorScheme.outlineVariant.withValues(alpha: 0.68),
+          ),
+        ),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: onPressed,
+          child: SizedBox(
+            width: 42,
+            height: 42,
+            child: Center(
+              child: loading
+                  ? const SizedBox.square(
+                      dimension: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : Icon(icon, size: 20),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

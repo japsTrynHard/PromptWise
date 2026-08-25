@@ -42,30 +42,27 @@ class HomeScreen extends StatelessWidget {
       adaptive,
     );
 
+    final compact = MediaQuery.sizeOf(context).width < AppBreakpoints.tablet;
+
     return AdaptiveBody(
       child: SingleChildScrollView(
-        padding: AdaptiveLayout.pageInsets(context),
+        padding: AdaptiveLayout.pageInsets(
+          context,
+          top: compact ? AppSpacing.lg : AppSpacing.page,
+          bottom: AppSpacing.section,
+        ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            PageIntro(
-              eyebrow: 'Home',
-              title: 'Welcome back, ${auth.displayName}',
-              description:
-                  'Pick up where you left off, follow your learning path, or see what is new with AI.',
-              trailing: Wrap(
-                spacing: AppSpacing.sm,
-                children: [
-                  IconButton.filledTonal(
-                    tooltip: 'Sign out',
-                    onPressed: auth.isLoading
-                        ? null
-                        : () => _signOut(context, auth),
-                    icon: const Icon(Icons.logout_rounded),
-                  ),
-                ],
+            if (compact)
+              _CompactHomeHero(displayName: auth.displayName)
+            else
+              PageIntro(
+                eyebrow: 'Home',
+                title: 'Welcome back, ${auth.displayName}',
+                description:
+                    'Pick up where you left off, follow your learning path, or see what is new with AI.',
               ),
-            ),
             const SizedBox(height: AppSpacing.lg),
             const SyncStatusBanner(),
             const SizedBox(height: AppSpacing.md),
@@ -320,41 +317,6 @@ class HomeScreen extends StatelessWidget {
     );
   }
 
-  Future<void> _signOut(BuildContext context, AuthController auth) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Sign out?'),
-        content: const Text(
-          'Your saved progress will remain connected to this account.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('Sign out'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmed != true || !context.mounted) return;
-    final success = await auth.signOut();
-    if (!context.mounted) return;
-
-    if (!success) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(auth.errorMessage ?? 'Sign out failed.')),
-      );
-      return;
-    }
-
-    Navigator.pushNamedAndRemoveUntil(context, AppRoutes.root, (_) => false);
-  }
-
   Lesson? _findNextLesson(
     List<Module> modules,
     Set<String> completedLessonIds, {
@@ -561,6 +523,84 @@ class _MasteryCard extends StatelessWidget {
           );
         },
       ),
+    );
+  }
+}
+
+class _CompactHomeHero extends StatelessWidget {
+  final String displayName;
+
+  const _CompactHomeHero({required this.displayName});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final firstName = displayName.trim().isEmpty
+        ? 'Learner'
+        : displayName.trim().split(' ').first;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.md,
+            vertical: AppSpacing.sm,
+          ),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(AppRadius.pill),
+            gradient: LinearGradient(
+              colors: [
+                AppColors.primary.withValues(alpha: 0.1),
+                AppColors.teal.withValues(alpha: 0.07),
+              ],
+            ),
+            border: Border.all(
+              color: theme.colorScheme.primary.withValues(alpha: 0.12),
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 8,
+                height: 8,
+                decoration: const BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: LinearGradient(
+                    colors: [AppColors.primary, AppColors.teal],
+                  ),
+                ),
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              Text(
+                'HOME',
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: theme.colorScheme.primary,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0.85,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: AppSpacing.lg),
+        Text(
+          'Welcome back, $firstName',
+          style: theme.textTheme.headlineSmall?.copyWith(
+            fontWeight: FontWeight.w900,
+            letterSpacing: -0.9,
+          ),
+        ),
+        const SizedBox(height: AppSpacing.sm),
+        Text(
+          'Continue where you left off, check your progress, and stay updated with AI.',
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+            height: 1.45,
+          ),
+        ),
+      ],
     );
   }
 }
