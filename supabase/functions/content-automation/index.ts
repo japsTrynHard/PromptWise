@@ -88,6 +88,51 @@ type GeneratedQuestion = {
   difficulty: number;
 };
 
+type GeneratedVerificationCase = {
+  title: string;
+  summary: string;
+  case_type: 'image' | 'video' | 'audio' | 'claim' | 'citation' | 'scam';
+  subskill:
+    | 'source_verification'
+    | 'claim_verification'
+    | 'media_provenance'
+    | 'manipulation_detection'
+    | 'citation_verification'
+    | 'uncertainty_judgment';
+  difficulty: number;
+  scenario: string;
+  claim_text: string;
+  media_type: string;
+  media_description: string;
+  evidence: Array<{
+    code: string;
+    label: string;
+    detail: string;
+    type: string;
+    is_key: boolean;
+  }>;
+  actions: Array<{
+    code: string;
+    label: string;
+    description: string;
+    useful: boolean;
+    reveals_evidence_codes: string[];
+  }>;
+  source_options: string[];
+  best_source_index: number;
+  correct_decision:
+    | 'supported'
+    | 'ai_generated'
+    | 'manipulated'
+    | 'misleading_context'
+    | 'unsupported_claim'
+    | 'unverified'
+    | 'insufficient_evidence';
+  expected_confidence: 'low' | 'medium' | 'high';
+  explanation: string;
+  learning_point: string;
+};
+
 type GeneratedDraftPayload = {
   title: string;
   summary: string;
@@ -96,6 +141,26 @@ type GeneratedDraftPayload = {
   objectives: Array<{ title: string; description: string }>;
   lesson_sections: string[];
   questions: GeneratedQuestion[];
+  verification_case?: GeneratedVerificationCase | null;
+};
+
+type VerificationGenerationStats = {
+  rowsFound: number;
+  considered: number;
+  created: number;
+  nonAiSkipped: number;
+  duplicateSkipped: number;
+  snapshotUsed: number;
+  sourceFetchFailed: number;
+  tooShort: number;
+  generationFailed: number;
+  insertFailed: number;
+  failureSamples: string[];
+};
+
+type GroqRequestBudget = {
+  remaining: number;
+  used: number;
 };
 
 Deno.serve(async (req) => {
@@ -130,6 +195,7 @@ Deno.serve(async (req) => {
   }
 
   const mode = body.mode === 'scheduled' ? 'scheduled' : 'manual';
+  const target = body.target === 'verification' ? 'verification' : 'all';
 
   try {
     if (mode === 'manual') {
@@ -145,9 +211,6 @@ Deno.serve(async (req) => {
       .single();
     if (settingsError) throw settingsError;
 
-    if (!settings.enabled) {
-      return jsonResponse({ message: 'Content automation is disabled.' });
-    }
 
     // Keep unattended queues bounded before every run. The same cleanup also
     // runs daily through pg_cron, so this is a second line of defense.
@@ -157,8 +220,29 @@ Deno.serve(async (req) => {
     if (cleanupError) {
       console.warn('Phase 7 queue cleanup could not run before automation.', cleanupError);
     }
+    const { error: phase9CleanupError } = await service.rpc(
+      'phase9_cleanup_verification_queues',
+    );
+    if (phase9CleanupError) {
+      console.warn('Phase 9 verification cleanup could not run before automation.', phase9CleanupError);
+    }
 
-    const [pendingDraftResult, pendingQuestionResult] = await Promise.all([
+    const { data: verificationSettings, error: verificationSettingsError } =
+      await service
+        .from('verification_automation_settings')
+        .select('*')
+        .eq('id', 1)
+        .single();
+    if (verificationSettingsError) throw verificationSettingsError;
+
+    if (target === 'verification' && verificationSettings.enabled === false) {
+      return jsonResponse({ message: 'Verification draft automation is disabled.' });
+    }
+    if (target !== 'verification' && settings.enabled === false) {
+      return jsonResponse({ message: 'Content automation is disabled.' });
+    }
+
+    const [pendingDraftResult, pendingQuestionResult, pendingVerificationResult] = await Promise.all([
       service
         .from('generated_content_drafts')
         .select('id', { count: 'exact', head: true })
@@ -169,13 +253,19 @@ Deno.serve(async (req) => {
         .eq('generated_by', 'content_automation')
         .eq('validation_status', 'needs_review')
         .neq('status', 'archived'),
+      service
+        .from('verification_case_drafts')
+        .select('id', { count: 'exact', head: true })
+        .eq('status', 'draft'),
     ]);
 
     if (pendingDraftResult.error) throw pendingDraftResult.error;
     if (pendingQuestionResult.error) throw pendingQuestionResult.error;
+    if (pendingVerificationResult.error) throw pendingVerificationResult.error;
 
     const pendingDrafts = Number(pendingDraftResult.count ?? 0);
     const pendingQuestions = Number(pendingQuestionResult.count ?? 0);
+    const pendingVerificationDrafts = Number(pendingVerificationResult.count ?? 0);
     const maxPendingDrafts = Math.max(
       1,
       Number(settings.max_pending_drafts ?? 30),
@@ -184,13 +274,25 @@ Deno.serve(async (req) => {
       1,
       Number(settings.max_pending_questions ?? 100),
     );
+    const maxPendingVerificationDrafts = Math.max(
+      1,
+      Number(verificationSettings.max_pending_drafts ?? 40),
+    );
 
-    if (pendingDrafts >= maxPendingDrafts || pendingQuestions >= maxPendingQuestions) {
-      const queueMessage =
-        `Content automation paused because the admin review queue is full. ` +
-        `Lesson drafts: ${pendingDrafts}/${maxPendingDrafts}; ` +
-        `questions: ${pendingQuestions}/${maxPendingQuestions}. ` +
-        `Review or archive pending AI content before generating more.`;
+    const queueIsFull = target === 'verification'
+      ? pendingVerificationDrafts >= maxPendingVerificationDrafts
+      : pendingDrafts >= maxPendingDrafts ||
+        pendingQuestions >= maxPendingQuestions ||
+        pendingVerificationDrafts >= maxPendingVerificationDrafts;
+
+    if (queueIsFull) {
+      const queueMessage = target === 'verification'
+        ? `Verification draft generation paused because the Verify review queue is full (${pendingVerificationDrafts}/${maxPendingVerificationDrafts}). Review or archive pending Verify drafts before generating more.`
+        : `Content automation paused because the admin review queue is full. ` +
+          `Lesson drafts: ${pendingDrafts}/${maxPendingDrafts}; ` +
+          `questions: ${pendingQuestions}/${maxPendingQuestions}; ` +
+          `verification drafts: ${pendingVerificationDrafts}/${maxPendingVerificationDrafts}. ` +
+          `Review or archive pending AI content before generating more.`;
 
       await service.from('automation_runs').insert({
         trigger_mode: mode,
@@ -204,10 +306,11 @@ Deno.serve(async (req) => {
         queuePaused: true,
         pendingDrafts,
         pendingQuestions,
+        pendingVerificationDrafts,
       }, 202);
     }
 
-    if (mode === 'manual' && settings.last_manual_run_at) {
+    if (mode === 'manual' && target !== 'verification' && settings.last_manual_run_at) {
       const last = new Date(settings.last_manual_run_at).getTime();
       const cooldownMs =
         Math.max(1, Number(settings.manual_cooldown_minutes ?? 30)) * 60000;
@@ -217,6 +320,37 @@ Deno.serve(async (req) => {
         return jsonResponse(
           {
             error: `Manual content checks have a cooldown. Try again in about ${minutes} minute${minutes === 1 ? '' : 's'}.`,
+          },
+          429,
+        );
+      }
+    }
+
+    if (mode === 'manual' && target === 'verification') {
+      const lastAttempt = verificationSettings.last_manual_attempt_at
+        ? new Date(verificationSettings.last_manual_attempt_at).getTime()
+        : 0;
+      const attemptRemainingMs = lastAttempt + 20_000 - Date.now();
+      if (attemptRemainingMs > 0) {
+        return jsonResponse(
+          {
+            error: 'A Verify source check was already started moments ago. Please wait a few seconds and try again.',
+          },
+          429,
+        );
+      }
+
+      const lastSuccess = verificationSettings.last_manual_success_at
+        ? new Date(verificationSettings.last_manual_success_at).getTime()
+        : 0;
+      const cooldownMs =
+        Math.max(1, Number(verificationSettings.manual_cooldown_minutes ?? 10)) * 60000;
+      const remainingMs = lastSuccess + cooldownMs - Date.now();
+      if (lastSuccess > 0 && remainingMs > 0) {
+        const minutes = Math.max(1, Math.ceil(remainingMs / 60000));
+        return jsonResponse(
+          {
+            error: `A successful Verify draft generation is on cooldown. Try again in about ${minutes} minute${minutes === 1 ? '' : 's'}.`,
           },
           429,
         );
@@ -245,7 +379,17 @@ Deno.serve(async (req) => {
     if (runError) throw runError;
     const runId = run.id as string;
 
-    if (mode === 'manual') {
+    if (mode === 'manual' && target === 'verification') {
+      const attemptAt = new Date().toISOString();
+      await service
+        .from('verification_automation_settings')
+        .update({
+          last_manual_attempt_at: attemptAt,
+          last_manual_error: null,
+          updated_at: attemptAt,
+        })
+        .eq('id', 1);
+    } else if (mode === 'manual') {
       await service
         .from('automation_settings')
         .update({
@@ -256,6 +400,155 @@ Deno.serve(async (req) => {
     }
 
     try {
+      if (target === 'verification') {
+        const todayStart = startOfUtcDay();
+        const monthStart = startOfUtcMonth();
+        const [todayResult, monthResult, groqMonthResult] = await Promise.all([
+          service
+            .from('verification_case_drafts')
+            .select('id', { count: 'exact', head: true })
+            .gte('created_at', todayStart),
+          service
+            .from('verification_case_drafts')
+            .select('id', { count: 'exact', head: true })
+            .gte('created_at', monthStart),
+          service
+            .from('verification_groq_requests')
+            .select('id', { count: 'exact', head: true })
+            .gte('requested_at', monthStart),
+        ]);
+        if (todayResult.error) throw todayResult.error;
+        if (monthResult.error) throw monthResult.error;
+        if (groqMonthResult.error) throw groqMonthResult.error;
+
+        const todayCount = Number(todayResult.count ?? 0);
+        const monthCount = Number(monthResult.count ?? 0);
+        const groqMonthCount = Number(groqMonthResult.count ?? 0);
+        const maxPerRun = Math.max(1, Math.min(10, Number(verificationSettings.max_drafts_per_run ?? 2)));
+        const maxPerDay = Math.max(1, Number(verificationSettings.max_drafts_per_day ?? 4));
+        const monthlyCap = Math.max(1, Number(verificationSettings.monthly_draft_cap ?? 40));
+        const monthlyGroqRequestCap = Math.max(
+          1,
+          Number(verificationSettings.monthly_groq_request_cap ?? 80),
+        );
+        const dailyRemaining = Math.max(0, maxPerDay - todayCount);
+        const monthlyRemaining = Math.max(0, monthlyCap - monthCount);
+        const groqRequestRemaining = Math.max(0, monthlyGroqRequestCap - groqMonthCount);
+        const queueRemaining = Math.max(0, maxPendingVerificationDrafts - pendingVerificationDrafts);
+        const verificationBudget = Math.min(maxPerRun, dailyRemaining, monthlyRemaining, queueRemaining);
+
+        if (verificationBudget <= 0 || groqRequestRemaining <= 0) {
+          const limitMessage = queueRemaining <= 0
+            ? `Verify draft generation is paused because the review queue is full (${pendingVerificationDrafts}/${maxPendingVerificationDrafts}).`
+            : groqRequestRemaining <= 0
+              ? `Verify draft generation reached the monthly Groq request limit (${groqMonthCount}/${monthlyGroqRequestCap}).`
+              : dailyRemaining <= 0
+                ? `Verify draft generation reached today's limit (${todayCount}/${maxPerDay}).`
+                : `Verify draft generation reached this month's draft limit (${monthCount}/${monthlyCap}).`;
+          await completeRun(service, runId, {
+            status: 'skipped',
+            sourcesChecked: 0,
+            articlesDiscovered: 0,
+            draftsCreated: 0,
+            verificationDraftsCreated: 0,
+          });
+          return jsonResponse({
+            message: limitMessage,
+            verificationDraftsCreated: 0,
+            draftsToday: todayCount,
+            draftsThisMonth: monthCount,
+            dailyRemaining,
+            monthlyRemaining,
+            groqRequestsThisMonth: groqMonthCount,
+            groqRequestsRemaining: groqRequestRemaining,
+            monthlyGroqRequestCap,
+          });
+        }
+
+        const groqBudget: GroqRequestBudget = {
+          remaining: groqRequestRemaining,
+          used: 0,
+        };
+        const result = await generateVerificationDraftsFromAwareness({
+          service,
+          apiKey: groqApiKey,
+          maxDrafts: verificationBudget,
+          maxArticles: Math.max(1, Math.min(20, Number(verificationSettings.max_articles_per_run ?? 6))),
+          groqBudget,
+        });
+
+        const hardFailures =
+          result.sourceFetchFailed + result.generationFailed + result.insertFailed;
+        const runFailed = result.created === 0 && hardFailures > 0;
+        const diagnostic = verificationDiagnostic(result);
+
+        await completeRun(service, runId, {
+          status: runFailed ? 'failed' : 'completed',
+          sourcesChecked: result.snapshotUsed > 0 ? 0 : 1,
+          articlesDiscovered: result.considered,
+          draftsCreated: 0,
+          verificationDraftsCreated: result.created,
+          errorMessage: runFailed ? diagnostic : undefined,
+        });
+
+        if (mode === 'manual') {
+          const now = new Date().toISOString();
+          if (result.created > 0) {
+            await service
+              .from('verification_automation_settings')
+              .update({
+                last_manual_success_at: now,
+                last_manual_run_at: now,
+                last_manual_error: null,
+                updated_at: now,
+              })
+              .eq('id', 1);
+          } else {
+            await service
+              .from('verification_automation_settings')
+              .update({
+                last_manual_error: hardFailures > 0 ? diagnostic : null,
+                updated_at: now,
+              })
+              .eq('id', 1);
+          }
+        }
+
+        const message = result.created > 0
+          ? `Verification check completed. ${result.created} fresh AI draft${result.created === 1 ? '' : 's'} created from current Awareness sources for administrator review.`
+          : hardFailures > 0
+            ? `Verification draft generation could not complete. ${diagnostic}`
+            : result.rowsFound === 0
+              ? 'No current Awareness articles are available for Verify draft generation.'
+              : result.duplicateSkipped >= result.rowsFound
+                ? 'All current Awareness articles already have a Verify draft or published case.'
+                : 'Verification check completed. No eligible source produced a new draft right now.';
+
+        return jsonResponse({
+          message,
+          success: !runFailed,
+          verificationDraftsCreated: result.created,
+          articlesFound: result.rowsFound,
+          articlesConsidered: result.considered,
+          duplicateSkipped: result.duplicateSkipped,
+          sourceSnapshotUsed: result.snapshotUsed,
+          sourceFetchFailed: result.sourceFetchFailed,
+          tooShort: result.tooShort,
+          generationFailed: result.generationFailed,
+          insertFailed: result.insertFailed,
+          failureSamples: result.failureSamples,
+          draftsToday: todayCount + result.created,
+          draftsThisMonth: monthCount + result.created,
+          dailyRemaining: Math.max(0, dailyRemaining - result.created),
+          monthlyRemaining: Math.max(0, monthlyRemaining - result.created),
+          groqRequestsThisMonth: groqMonthCount + groqBudget.used,
+          groqRequestsRemaining: groqBudget.remaining,
+          monthlyGroqRequestCap,
+          maxDraftsPerRun: maxPerRun,
+          monthlyDraftCap: monthlyCap,
+        }, runFailed ? 502 : 200);
+      }
+
       const todayStart = startOfUtcDay();
       const monthStart = startOfUtcMonth();
       const [{ count: todayCount }, { count: monthCount }] = await Promise.all([
@@ -339,6 +632,7 @@ Deno.serve(async (req) => {
 
       let articlesDiscovered = 0;
       let draftsCreated = 0;
+      let verificationDraftsCreated = 0;
       let processingFailures = 0;
       const maxArticles = Math.max(1, Number(settings.max_articles_per_run ?? 3));
       const groqModels = await resolveGroqModels(groqApiKey);
@@ -424,6 +718,45 @@ Deno.serve(async (req) => {
             });
           if (draftError) throw draftError;
 
+          const verificationCase = draft.verification_case ?? null;
+          if (
+            verificationSettings.enabled !== false &&
+            verificationCase != null &&
+            pendingVerificationDrafts + verificationDraftsCreated <
+              maxPendingVerificationDrafts
+          ) {
+            // Phase 9 verification cases are optional companions to the lesson
+            // draft. A malformed/duplicate verification case must never turn a
+            // valid Phase 7 lesson draft into a failed article run.
+            try {
+              validateVerificationCaseDraft(verificationCase);
+              const { error: verificationDraftError } = await service
+                .from('verification_case_drafts')
+                .insert({
+                  article_id: article.id,
+                  title: verificationCase.title,
+                  summary: verificationCase.summary,
+                  source_name: candidate.sourceName,
+                  source_url: candidate.url,
+                  source_published_at: candidate.publishedAt,
+                  draft_payload: verificationCase,
+                  status: 'draft',
+                });
+              if (verificationDraftError) {
+                const code = (verificationDraftError as { code?: string }).code;
+                if (code !== '23505') throw verificationDraftError;
+              } else {
+                verificationDraftsCreated += 1;
+              }
+            } catch (verificationError) {
+              console.warn(
+                'Optional Phase 9 verification case was skipped:',
+                candidate.url,
+                errorMessage(verificationError),
+              );
+            }
+          }
+
           await markArticle(service, article.id, 'processed');
           draftsCreated += 1;
         } catch (error) {
@@ -438,10 +771,11 @@ Deno.serve(async (req) => {
         sourcesChecked,
         articlesDiscovered,
         draftsCreated,
+        verificationDraftsCreated,
       });
 
-      const message = draftsCreated > 0
-        ? `Content check completed. ${draftsCreated} new review draft${draftsCreated === 1 ? '' : 's'} created from trusted sources.`
+      const message = draftsCreated > 0 || verificationDraftsCreated > 0
+        ? `Content check completed. ${draftsCreated} lesson draft${draftsCreated === 1 ? '' : 's'} and ${verificationDraftsCreated} verification case draft${verificationDraftsCreated === 1 ? '' : 's'} created from trusted sources.`
         : processingFailures > 0
           ? `Content check completed, but ${processingFailures} candidate article${processingFailures === 1 ? '' : 's'} could not be converted into a valid draft. Check the Edge Function logs.`
           : 'Content check completed. No new relevant, non-duplicate draft was needed.';
@@ -452,6 +786,7 @@ Deno.serve(async (req) => {
         articlesDiscovered,
         draftsCreated,
         processingFailures,
+        verificationDraftsCreated,
       });
     } catch (error) {
       await completeRun(service, runId, {
@@ -732,28 +1067,34 @@ async function fetchText(url: string): Promise<string> {
 }
 
 async function resolveGroqModels(apiKey: string): Promise<string[]> {
-  const configured = Deno.env.get('GROQ_MODEL')?.trim();
-  if (configured) return [configured];
+  const configured = Deno.env.get('GROQ_MODEL')?.trim() ?? '';
+  let ids: string[] = [];
 
-  const response = await fetch('https://api.groq.com/openai/v1/models', {
-    headers: { Authorization: `Bearer ${apiKey}` },
-  });
-  if (!response.ok) {
-    const detail = (await response.text()).slice(0, 800);
-    throw new Error(`Could not list Groq models (${response.status}): ${detail}`);
+  try {
+    const response = await fetch('https://api.groq.com/openai/v1/models', {
+      headers: { Authorization: `Bearer ${apiKey}` },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!response.ok) {
+      const detail = (await response.text()).slice(0, 800);
+      throw new Error(`Could not list Groq models (${response.status}): ${detail}`);
+    }
+
+    const data = (await response.json()) as { data?: Array<{ id?: string }> };
+    ids = (data.data ?? [])
+      .map((item) => item.id?.trim() ?? '')
+      .filter(Boolean)
+      .filter((id) => !/whisper|tts|speech|guard|safeguard|vision|image/i.test(id));
+  } catch (error) {
+    if (!configured) throw error;
+    console.warn(
+      'Could not refresh the Groq model list; trying configured model only:',
+      errorMessage(error),
+    );
+    return [configured];
   }
 
-  const data = (await response.json()) as { data?: Array<{ id?: string }> };
-  const ids = (data.data ?? [])
-    .map((item) => item.id?.trim() ?? '')
-    .filter(Boolean)
-    .filter((id) => !/whisper|tts|speech|guard|safeguard|vision|image/i.test(id));
-
-  // Prefer production text models that support structured/JSON output while
-  // still honoring the exact models exposed to this Groq project/key.
   const preferredOrder = [
-    // Prefer the lighter production model first for automated curriculum
-    // drafting. Larger models remain fallbacks when available.
     'llama-3.1-8b-instant',
     'openai/gpt-oss-20b',
     'openai/gpt-oss-120b',
@@ -764,17 +1105,454 @@ async function resolveGroqModels(apiKey: string): Promise<string[]> {
   ];
 
   const ordered: string[] = [];
+  if (configured) ordered.push(configured);
   for (const preferred of preferredOrder) {
-    if (ids.includes(preferred)) ordered.push(preferred);
+    if (ids.includes(preferred) && !ordered.includes(preferred)) {
+      ordered.push(preferred);
+    }
   }
   for (const id of ids) {
     if (!ordered.includes(id)) ordered.push(id);
   }
 
-  if (ordered.length == 0) {
+  if (ordered.length === 0) {
     throw new Error('No usable Groq text model is available to this project.');
   }
   return ordered;
+}
+
+async function generateVerificationDraftsFromAwareness({
+  service,
+  apiKey,
+  maxDrafts,
+  maxArticles,
+  groqBudget,
+}: {
+  service: ReturnType<typeof createClient>;
+  apiKey: string;
+  maxDrafts: number;
+  maxArticles: number;
+  groqBudget: GroqRequestBudget;
+}): Promise<VerificationGenerationStats> {
+  const stats: VerificationGenerationStats = {
+    rowsFound: 0,
+    considered: 0,
+    created: 0,
+    nonAiSkipped: 0,
+    duplicateSkipped: 0,
+    snapshotUsed: 0,
+    sourceFetchFailed: 0,
+    tooShort: 0,
+    generationFailed: 0,
+    insertFailed: 0,
+    failureSamples: [],
+  };
+  if (maxDrafts <= 0) return stats;
+
+  const cutoff = new Date(Date.now() - 21 * 86_400_000).toISOString();
+  const { data: rows, error } = await service
+    .from('awareness_articles')
+    .select(
+      'id,title,summary,source_name,source_url,published_at,relevance_score,ai_relevance_score,category,region,content_excerpt,content_fetch_status',
+    )
+    .eq('is_active', true)
+    .gte('ai_relevance_score', 4)
+    .gte('discovered_at', cutoff)
+    .order('relevance_score', { ascending: false })
+    .order('published_at', { ascending: false })
+    .limit(Math.max(1, Math.min(24, maxArticles)));
+  if (error) throw error;
+
+  stats.rowsFound = (rows ?? []).length;
+  if (stats.rowsFound === 0) return stats;
+
+  const models = await resolveGroqModels(apiKey);
+
+  for (const raw of rows ?? []) {
+    if (stats.created >= maxDrafts || groqBudget.remaining <= 0) break;
+    const row = asRecord(raw);
+    const sourceUrl = textValue(row.source_url).trim();
+    const title = textValue(row.title).trim();
+    if (!sourceUrl || !title) continue;
+
+    // Eligibility must come from the headline/learner summary, not the full
+    // scraped article body. Related links or navigation in a long page must not
+    // turn a generic cybersecurity/politics story into an AI Verify source.
+    const aiSourceText = [title, textValue(row.summary)].join(' ');
+    if (Number(row.ai_relevance_score ?? 0) < 4 || !isAiAwarenessSource(aiSourceText)) {
+      stats.nonAiSkipped += 1;
+      continue;
+    }
+
+    const { data: existing, error: existingError } = await service
+      .from('verification_case_drafts')
+      .select('id,status')
+      .eq('source_url', sourceUrl)
+      .neq('status', 'rejected')
+      .limit(1);
+    if (existingError) throw existingError;
+    if ((existing ?? []).length > 0) {
+      stats.duplicateSkipped += 1;
+      continue;
+    }
+
+    stats.considered += 1;
+
+    let articleText = textValue(row.content_excerpt).trim();
+    if (articleText.length >= 250) {
+      stats.snapshotUsed += 1;
+    } else {
+      try {
+        articleText = await fetchArticleText(sourceUrl);
+      } catch (sourceError) {
+        stats.sourceFetchFailed += 1;
+        pushFailureSample(
+          stats,
+          `Source fetch failed for ${sourceUrl}: ${errorMessage(sourceError)}`,
+        );
+        continue;
+      }
+    }
+
+    if (articleText.length < 250) {
+      stats.tooShort += 1;
+      pushFailureSample(
+        stats,
+        `Source text was too short for a grounded Verify draft: ${sourceUrl}`,
+      );
+      continue;
+    }
+
+    const candidate: Candidate = {
+      sourceId: textValue(row.id),
+      sourceName: textValue(row.source_name) || 'Trusted source',
+      url: sourceUrl,
+      title,
+      summary: textValue(row.summary),
+      publishedAt: parseDate(textValue(row.published_at)),
+      relevanceScore: Number(row.relevance_score ?? 80),
+      topicHint: 'verification',
+    };
+
+    let verificationCase: GeneratedVerificationCase;
+    try {
+      verificationCase = await generateVerificationCaseOnly({
+        service,
+        apiKey,
+        models,
+        groqBudget,
+        candidate,
+        articleText,
+        category: textValue(row.category),
+        region: textValue(row.region),
+      });
+      validateVerificationCaseDraft(verificationCase);
+    } catch (draftError) {
+      stats.generationFailed += 1;
+      pushFailureSample(
+        stats,
+        `AI draft failed for ${sourceUrl}: ${errorMessage(draftError)}`,
+      );
+      continue;
+    }
+
+    const { error: insertError } = await service
+      .from('verification_case_drafts')
+      .insert({
+        article_id: textValue(row.id) || null,
+        title: verificationCase.title,
+        summary: verificationCase.summary,
+        source_name: candidate.sourceName,
+        source_url: candidate.url,
+        source_published_at: candidate.publishedAt,
+        draft_payload: verificationCase,
+        status: 'draft',
+      });
+    if (insertError) {
+      const code = (insertError as { code?: string }).code;
+      if (code === '23505') {
+        stats.duplicateSkipped += 1;
+      } else {
+        stats.insertFailed += 1;
+        pushFailureSample(
+          stats,
+          `Draft save failed for ${sourceUrl}: ${errorMessage(insertError)}`,
+        );
+      }
+      continue;
+    }
+
+    stats.created += 1;
+  }
+
+  return stats;
+}
+
+function aiAwarenessSourceScore(input: string): number {
+  const text = input.toLowerCase().replace(/\s+/g, ' ').trim();
+  if (!text) return 0;
+
+  let score = 0;
+  if (/\bartificial intelligence\b/.test(text)) score += 6;
+  if (/\bgenerative ai\b|\bgenai\b/.test(text)) score += 6;
+  if (/\bdeep[ -]?fake(s)?\b/.test(text)) score += 7;
+  if (/\bsynthetic media\b/.test(text)) score += 7;
+  if (/\bvoice clon(e|ed|ing)?\b|\bcloned voice\b/.test(text)) score += 7;
+  if (/\bai[- ]generated\b|\bai[- ]made\b|\bai[- ]created\b/.test(text)) score += 6;
+  if (/\bai[- ]powered\b|\bai[- ]driven\b|\bai[- ]assisted\b/.test(text)) score += 5;
+  if (/(^|[^a-z0-9])ai([^a-z0-9]|$)/.test(text)) score += 4;
+  if (/\bchatgpt\b|\bopenai\b|\bgoogle gemini\b|\bgemini ai\b|\bgoogle ai\b|\bclaude ai\b|\banthropic\b|\bcopilot\b|\bgrok\b|\bmeta ai\b|\bllm(s)?\b|\blarge language model(s)?\b/.test(text)) {
+    score += 4;
+  }
+  return Math.min(20, score);
+}
+
+function isAiAwarenessSource(input: string): boolean {
+  return aiAwarenessSourceScore(input) >= 4;
+}
+
+function pushFailureSample(
+  stats: VerificationGenerationStats,
+  message: string,
+): void {
+  if (stats.failureSamples.length >= 3) return;
+  stats.failureSamples.push(message.slice(0, 360));
+}
+
+function verificationDiagnostic(stats: VerificationGenerationStats): string {
+  const parts: string[] = [];
+  if (stats.nonAiSkipped > 0) {
+    parts.push(`${stats.nonAiSkipped} non-AI awareness source${stats.nonAiSkipped === 1 ? '' : 's'} skipped`);
+  }
+  if (stats.sourceFetchFailed > 0) {
+    parts.push(`${stats.sourceFetchFailed} source fetch failed`);
+  }
+  if (stats.tooShort > 0) {
+    parts.push(`${stats.tooShort} source had insufficient text`);
+  }
+  if (stats.generationFailed > 0) {
+    parts.push(`${stats.generationFailed} AI generation failed`);
+  }
+  if (stats.insertFailed > 0) {
+    parts.push(`${stats.insertFailed} draft save failed`);
+  }
+  if (parts.length === 0) {
+    return 'No eligible source produced a new draft.';
+  }
+  const sample = stats.failureSamples.length > 0
+    ? ` ${stats.failureSamples[0]}`
+    : '';
+  return `${parts.join(', ')}.${sample}`.trim();
+}
+
+function parseJsonObject(content: string): JsonRecord {
+  const trimmed = content.trim();
+  if (!trimmed) throw new Error('AI returned an empty response.');
+
+  const unfenced = trimmed
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```$/i, '')
+    .trim();
+
+  try {
+    const parsed = JSON.parse(unfenced);
+    if (typeof parsed !== 'object' || parsed == null || Array.isArray(parsed)) {
+      throw new Error('AI response was not a JSON object.');
+    }
+    return parsed as JsonRecord;
+  } catch (firstError) {
+    const start = unfenced.indexOf('{');
+    const end = unfenced.lastIndexOf('}');
+    if (start >= 0 && end > start) {
+      const parsed = JSON.parse(unfenced.slice(start, end + 1));
+      if (typeof parsed === 'object' && parsed != null && !Array.isArray(parsed)) {
+        return parsed as JsonRecord;
+      }
+    }
+    throw firstError;
+  }
+}
+
+async function generateVerificationCaseOnly({
+  service,
+  apiKey,
+  models,
+  groqBudget,
+  candidate,
+  articleText,
+  category,
+  region,
+}: {
+  service: ReturnType<typeof createClient>;
+  apiKey: string;
+  models: string[];
+  groqBudget: GroqRequestBudget;
+  candidate: Candidate;
+  articleText: string;
+  category: string;
+  region: string;
+}): Promise<GeneratedVerificationCase> {
+  const prompt = `You create ONE administrator-review DRAFT for PromptWise Verify.
+
+SOURCE SAFETY:
+- Use ONLY the supplied article material for event-specific facts.
+- This Verify automation is AI-awareness-only. The source itself must clearly involve AI, generative AI, deepfakes, synthetic media, AI-enabled scams, AI misinformation/disinformation, AI privacy/safety, AI misuse, or a named AI system.
+- Never force a generic scam, politics, cybersecurity, or fake-news story into an AI case when the source does not clearly contain that AI connection.
+- Never invent a person, quote, date, statistic, evidence item, or source detail.
+- The output is a draft. A human administrator must approve it before learners see it.
+
+LEARNER EXPERIENCE:
+- PromptWise Verify is intentionally simple and engaging, not an exam.
+- Use plain everyday English. Avoid jargon such as provenance, epistemic, corroboration, modality, or synthetic-media for Foundation/Developing wording.
+- Prefer a short realistic situation and one clear conclusion.
+- Difficulty 1-2: scenario max 2 short sentences; claim_text max 140 characters; explanation max 3 short sentences; learning_point one short sentence.
+- Difficulty 3-5 can involve ambiguity or conflicting evidence, but learner-facing wording must still be concise.
+- Difficulty should come from reasoning, not difficult vocabulary.
+
+VALID VALUES:
+subskill: source_verification | claim_verification | media_provenance | manipulation_detection | citation_verification | uncertainty_judgment
+case_type: image | video | audio | claim | citation | scam
+correct_decision: supported | ai_generated | manipulated | misleading_context | unsupported_claim | unverified | insufficient_evidence
+expected_confidence: low | medium | high
+
+Return STRICT JSON only with exactly this shape:
+{
+  "title":"...",
+  "summary":"...",
+  "case_type":"claim",
+  "subskill":"claim_verification",
+  "difficulty":2,
+  "scenario":"...",
+  "claim_text":"...",
+  "media_type":"text",
+  "media_description":"...",
+  "evidence":[
+    {"code":"e1","label":"...","detail":"...","type":"source","is_key":true},
+    {"code":"e2","label":"...","detail":"...","type":"context","is_key":true},
+    {"code":"e3","label":"...","detail":"...","type":"context","is_key":false},
+    {"code":"e4","label":"...","detail":"...","type":"source","is_key":false}
+  ],
+  "actions":[
+    {"code":"a1","label":"...","description":"...","useful":true,"reveals_evidence_codes":["e1"]},
+    {"code":"a2","label":"...","description":"...","useful":true,"reveals_evidence_codes":["e2"]},
+    {"code":"a3","label":"...","description":"...","useful":false,"reveals_evidence_codes":[]},
+    {"code":"a4","label":"...","description":"...","useful":false,"reveals_evidence_codes":[]}
+  ],
+  "source_options":["...","...","...","..."],
+  "best_source_index":0,
+  "correct_decision":"unsupported_claim",
+  "expected_confidence":"high",
+  "explanation":"...",
+  "learning_point":"..."
+}
+
+Use exactly 4 source_options. Use 4-6 evidence items and 4-6 actions. At least two evidence items must be key. The correct decision must be defensible from the supplied material.
+
+Awareness category: ${category || 'online safety'}
+Region: ${region || 'Global'}
+Trusted source: ${candidate.sourceName}
+Source URL: ${candidate.url}
+Source title: ${candidate.title}
+Source summary: ${candidate.summary}
+
+SOURCE MATERIAL:
+${articleText.slice(0, MAX_ARTICLE_TEXT)}`;
+
+  const failures: string[] = [];
+  // At most three fallback models may be tried for one article. This prevents
+  // one malformed source from consuming the entire monthly request budget.
+  for (const model of models.slice(0, 3)) {
+    if (groqBudget.remaining <= 0) {
+      throw new Error('Monthly Verify Groq request limit reached.');
+    }
+
+    // Reserve the request before contacting Groq. If usage logging cannot be
+    // persisted we fail closed, so repeated failures cannot bypass the cap.
+    const { data: usageRow, error: usageError } = await service
+      .from('verification_groq_requests')
+      .insert({
+        model,
+        success: false,
+        source_url: candidate.url,
+      })
+      .select('id')
+      .single();
+    if (usageError) throw usageError;
+    const usageId = textValue(usageRow?.id);
+    groqBudget.remaining -= 1;
+    groqBudget.used += 1;
+
+    let response: Response;
+    try {
+      response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        signal: AbortSignal.timeout(30_000),
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model,
+          temperature: 0.15,
+          response_format: { type: 'json_object' },
+          messages: [
+            {
+              role: 'system',
+              content:
+                'Create source-grounded verification activity drafts as strict JSON. Keep learner wording short, normal, and easy to understand. Never auto-publish.',
+            },
+            { role: 'user', content: prompt },
+          ],
+        }),
+      });
+    } catch (error) {
+      if (usageId) {
+        await service
+          .from('verification_groq_requests')
+          .update({ error_code: 'network_error' })
+          .eq('id', usageId);
+      }
+      failures.push(`${model}: ${errorMessage(error)}`);
+      continue;
+    }
+
+    if (!response.ok) {
+      if (usageId) {
+        await service
+          .from('verification_groq_requests')
+          .update({ error_code: `http_${response.status}` })
+          .eq('id', usageId);
+      }
+      failures.push(`${model}: HTTP ${response.status}`);
+      if (response.status === 401) break;
+      continue;
+    }
+    try {
+      const data = (await response.json()) as JsonRecord;
+      const choices = asArray(data.choices);
+      const first = asRecord(choices[0]);
+      const message = asRecord(first.message);
+      const content = textValue(message.content);
+      const parsed = parseJsonObject(content) as unknown as GeneratedVerificationCase;
+      validateVerificationCaseDraft(parsed);
+      if (usageId) {
+        await service
+          .from('verification_groq_requests')
+          .update({ success: true, error_code: null })
+          .eq('id', usageId);
+      }
+      return parsed;
+    } catch (error) {
+      if (usageId) {
+        await service
+          .from('verification_groq_requests')
+          .update({ error_code: 'invalid_payload' })
+          .eq('id', usageId);
+      }
+      failures.push(`${model}: ${errorMessage(error)}`);
+    }
+  }
+  throw new Error(`No Groq model produced a valid verification draft. ${failures.join(' | ')}`);
 }
 
 async function generateDraft({
@@ -827,7 +1605,46 @@ Return STRICT JSON only with this exact shape:
       "explanation":"Explain why the keyed answer is best and what principle it demonstrates.",
       "difficulty":3
     }
-  ]
+  ],
+  "verification_case": null
+}
+
+PHASE 9 VERIFICATION CASE RULES:
+- If this source contains a concrete, source-grounded claim/event/media/citation/scam scenario suitable for teaching verification, replace verification_case:null with ONE case object. Otherwise keep it null.
+- Do not invent a fake news event or unsupported evidence. Every factual detail in a generated case must be supportable from the source material.
+- The learner-facing activity is a simple single-choice verification challenge. Use plain, everyday English and short sentences.
+- For difficulty 1-2, scenario must be at most 2 short sentences, claim_text at most 140 characters, explanation at most 3 short sentences, and learning_point one short sentence. Avoid technical terms such as “provenance”, “corroboration”, or “epistemic” in learner-facing fields.
+- For difficulty 3-5, reasoning can be harder, but scenario should still be concise and readable without specialist knowledge. Put technical detail in hidden evidence/actions instead of the learner-facing prompt.
+- Never make a beginner case difficult mainly because of vocabulary. Difficulty should come from the evidence pattern, not jargon.
+- Valid subskills: source_verification, claim_verification, media_provenance, manipulation_detection, citation_verification, uncertainty_judgment.
+- Valid case_type: image, video, audio, claim, citation, scam.
+- Valid decisions: supported, ai_generated, manipulated, misleading_context, unsupported_claim, unverified, insufficient_evidence.
+- Include exactly 4 source_options and exactly one best_source_index for administrator quality review; these fields are not shown in the simple learner challenge.
+- Include 4-6 evidence items for administrator fact-checking and future expansion. At least two must have is_key=true; include at least one plausible but non-key clue.
+- Include 4-6 verification actions as hidden case metadata for administrator review/future advanced mode. Some actions must be useful=false and useful actions must reveal the key evidence codes.
+- Higher difficulties must involve trade-offs, conflicting evidence, scope limits, or legitimate uncertainty.
+- “insufficient_evidence” should be used when the source cannot support a binary conclusion.
+- The case remains a DRAFT for administrator fact-checking.
+
+When non-null, verification_case must have exactly this shape:
+{
+  "title":"...",
+  "summary":"...",
+  "case_type":"claim",
+  "subskill":"claim_verification",
+  "difficulty":3,
+  "scenario":"...",
+  "claim_text":"...",
+  "media_type":"text",
+  "media_description":"...",
+  "evidence":[{"code":"e1","label":"...","detail":"...","type":"source","is_key":true}],
+  "actions":[{"code":"a1","label":"...","description":"...","useful":true,"reveals_evidence_codes":["e1"]}],
+  "source_options":["...","...","...","..."],
+  "best_source_index":0,
+  "correct_decision":"unsupported_claim",
+  "expected_confidence":"high",
+  "explanation":"...",
+  "learning_point":"..."
 }
 
 Trusted source: ${candidate.sourceName}
@@ -852,6 +1669,7 @@ A previous generation attempt failed PromptWise validation. Make this response f
       'https://api.groq.com/openai/v1/chat/completions',
       {
         method: 'POST',
+        signal: AbortSignal.timeout(30_000),
         headers: {
           Authorization: `Bearer ${apiKey}`,
           'Content-Type': 'application/json',
@@ -896,13 +1714,7 @@ A previous generation attempt failed PromptWise validation. Make this response f
       const content = textValue(message.content).trim();
       if (!content) throw new Error('Groq returned an empty draft.');
 
-      const cleaned = content
-        .replace(/^```json\s*/i, '')
-        .replace(/^```\s*/i, '')
-        .replace(/```\s*$/i, '')
-        .trim();
-
-      const draft = JSON.parse(cleaned) as GeneratedDraftPayload;
+      const draft = parseJsonObject(content) as unknown as GeneratedDraftPayload;
       validateDraft(draft);
       console.log(`Groq draft generation succeeded with model: ${model}`);
       return draft;
@@ -970,6 +1782,90 @@ function validateDraft(draft: GeneratedDraftPayload): void {
   }
 }
 
+function validateVerificationCaseDraft(value: GeneratedVerificationCase): void {
+  const subskills = new Set([
+    'source_verification',
+    'claim_verification',
+    'media_provenance',
+    'manipulation_detection',
+    'citation_verification',
+    'uncertainty_judgment',
+  ]);
+  const caseTypes = new Set(['image', 'video', 'audio', 'claim', 'citation', 'scam']);
+  const decisions = new Set([
+    'supported',
+    'ai_generated',
+    'manipulated',
+    'misleading_context',
+    'unsupported_claim',
+    'unverified',
+    'insufficient_evidence',
+  ]);
+  if (!nonEmpty(value.title) || !nonEmpty(value.summary) || !nonEmpty(value.scenario)) {
+    throw new Error('Generated verification case is missing core text.');
+  }
+  if (!caseTypes.has(value.case_type) || !subskills.has(value.subskill)) {
+    throw new Error('Generated verification case type/subskill is invalid.');
+  }
+  if (!Number.isInteger(value.difficulty) || value.difficulty < 1 || value.difficulty > 5) {
+    throw new Error('Generated verification difficulty is invalid.');
+  }
+  if (!decisions.has(value.correct_decision)) {
+    throw new Error('Generated verification decision is invalid.');
+  }
+  if (!['low', 'medium', 'high'].includes(value.expected_confidence)) {
+    throw new Error('Generated verification confidence is invalid.');
+  }
+  if (!Array.isArray(value.source_options) || value.source_options.length !== 4 ||
+      !Number.isInteger(value.best_source_index) || value.best_source_index < 0 || value.best_source_index > 3) {
+    throw new Error('Generated verification source options are invalid.');
+  }
+  if (!Array.isArray(value.evidence) || value.evidence.length < 4 || value.evidence.length > 6) {
+    throw new Error('Generated verification case needs 4-6 evidence items.');
+  }
+  const evidenceCodes = new Set<string>();
+  let keyEvidence = 0;
+  for (const item of value.evidence) {
+    if (!nonEmpty(item.code) || !nonEmpty(item.label) || !nonEmpty(item.detail)) {
+      throw new Error('Generated verification evidence is incomplete.');
+    }
+    if (evidenceCodes.has(item.code)) throw new Error('Verification evidence codes must be unique.');
+    evidenceCodes.add(item.code);
+    if (item.is_key) keyEvidence += 1;
+  }
+  if (keyEvidence < 2) throw new Error('Verification case needs at least two key evidence items.');
+  if (!Array.isArray(value.actions) || value.actions.length < 4 || value.actions.length > 6) {
+    throw new Error('Generated verification case needs 4-6 actions.');
+  }
+  let usefulActions = 0;
+  let nonUsefulActions = 0;
+  const revealed = new Set<string>();
+  for (const action of value.actions) {
+    if (!nonEmpty(action.code) || !nonEmpty(action.label) || !nonEmpty(action.description)) {
+      throw new Error('Generated verification action is incomplete.');
+    }
+    if (!Array.isArray(action.reveals_evidence_codes)) {
+      throw new Error('Generated verification action reveal list is invalid.');
+    }
+    for (const code of action.reveals_evidence_codes) {
+      if (!evidenceCodes.has(code)) throw new Error('Verification action reveals unknown evidence.');
+      if (action.useful) revealed.add(code);
+    }
+    if (action.useful) usefulActions += 1; else nonUsefulActions += 1;
+  }
+  if (usefulActions < 2 || nonUsefulActions < 1) {
+    throw new Error('Verification case needs useful actions and at least one non-useful action.');
+  }
+  for (const item of value.evidence) {
+    if (item.is_key && !revealed.has(item.code)) {
+      throw new Error('Every key evidence item must be revealable by a useful action.');
+    }
+  }
+  if (!nonEmpty(value.explanation) || !nonEmpty(value.learning_point)) {
+    throw new Error('Generated verification explanation is incomplete.');
+  }
+}
+
 async function markArticle(
   service: ReturnType<typeof createClient>,
   articleId: string,
@@ -989,6 +1885,7 @@ async function completeRun(
     sourcesChecked: number;
     articlesDiscovered: number;
     draftsCreated: number;
+    verificationDraftsCreated?: number;
     errorMessage?: string;
   },
 ): Promise<void> {
@@ -1000,6 +1897,7 @@ async function completeRun(
       sources_checked: values.sourcesChecked,
       articles_discovered: values.articlesDiscovered,
       drafts_created: values.draftsCreated,
+      verification_drafts_created: values.verificationDraftsCreated ?? 0,
       error_message: values.errorMessage ?? null,
     })
     .eq('id', runId);

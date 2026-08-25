@@ -4,23 +4,30 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-import 'app.dart';
-import 'config/app_environment.dart';
-import 'controllers/adaptive_learning_controller.dart';
-import 'controllers/auth_controller.dart';
-import 'controllers/content_controller.dart';
-import 'controllers/content_automation_controller.dart';
-import 'controllers/learning_progression_controller.dart';
-import 'controllers/progress_controller.dart';
-import 'controllers/sandbox_controller.dart';
-import 'controllers/theme_controller.dart';
-import 'repositories/adaptive_learning_repository.dart';
-import 'repositories/auth_repository.dart';
-import 'repositories/content_repository.dart';
-import 'repositories/content_automation_repository.dart';
-import 'repositories/learning_progression_repository.dart';
-import 'repositories/progress_repository.dart';
-import 'services/integration_service.dart';
+import './app.dart';
+import './core/config/app_environment.dart';
+import './presentation/controllers/adaptive_learning_controller.dart';
+import './presentation/controllers/auth_controller.dart';
+import './presentation/controllers/awareness_feed_controller.dart';
+import './presentation/controllers/content_controller.dart';
+import './presentation/controllers/content_automation_controller.dart';
+import './presentation/controllers/learning_progression_controller.dart';
+import './presentation/controllers/image_comparison_controller.dart';
+import './presentation/controllers/progress_controller.dart';
+import './presentation/controllers/sandbox_controller.dart';
+import './presentation/controllers/theme_controller.dart';
+import './presentation/controllers/verification_controller.dart';
+import './data/repositories/adaptive_learning_repository.dart';
+import './data/repositories/auth_repository.dart';
+import './data/repositories/content_repository.dart';
+import './data/repositories/content_automation_repository.dart';
+import './data/repositories/learning_progression_repository.dart';
+import './data/repositories/progress_repository.dart';
+import './data/repositories/prompt_coach_repository.dart';
+import './data/repositories/verification_repository.dart';
+import './data/services/integration_service.dart';
+import './data/services/awareness_feed_service.dart';
+import './data/services/verification_media_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -32,6 +39,10 @@ Future<void> main() async {
   ContentAutomationRepository? contentAutomationRepository;
   LearningProgressionRepository? learningProgressionRepository;
   IntegrationService? integrationService;
+  PromptCoachRepository? promptCoachRepository;
+  VerificationRepository? verificationRepository;
+  VerificationMediaService? verificationMediaService;
+  AwarenessFeedService? awarenessFeedService;
 
   if (AppEnvironment.isSupabaseConfigured) {
     await Supabase.initialize(
@@ -46,6 +57,10 @@ Future<void> main() async {
     contentAutomationRepository = ContentAutomationRepository(client);
     learningProgressionRepository = LearningProgressionRepository(client);
     integrationService = IntegrationService(client: client);
+    promptCoachRepository = PromptCoachRepository(client);
+    verificationRepository = VerificationRepository(client);
+    verificationMediaService = VerificationMediaService(client: client);
+    awarenessFeedService = AwarenessFeedService(client: client);
   }
 
   runApp(
@@ -93,7 +108,7 @@ Future<void> main() async {
             unawaited(progressController.bindAuthenticatedUser(auth.userId));
             if (content.isLive &&
                 progressController.syncState == ProgressSyncState.error) {
-              unawaited(progressController.retryInit());
+              unawaited(progressController.retryInit(automatic: true));
             }
             return progressController;
           },
@@ -157,8 +172,58 @@ Future<void> main() async {
             return automation;
           },
         ),
-        ChangeNotifierProvider(
-          create: (_) => SandboxController(service: integrationService),
+        ChangeNotifierProxyProvider<AuthController, VerificationController>(
+          create: (_) => VerificationController(repository: verificationRepository),
+          update: (_, auth, controller) {
+            final verification = controller ??
+                VerificationController(repository: verificationRepository);
+            unawaited(verification.bindAuthenticatedUser(auth.userId));
+            return verification;
+          },
+        ),
+        ChangeNotifierProxyProvider<AuthController, ImageComparisonController>(
+          create: (_) => ImageComparisonController(service: verificationMediaService),
+          update: (_, auth, controller) {
+            final comparison = controller ??
+                ImageComparisonController(service: verificationMediaService);
+            unawaited(comparison.bindAuthenticatedUser(auth.userId));
+            return comparison;
+          },
+        ),
+        ChangeNotifierProxyProvider<AuthController, AwarenessFeedController>(
+          create: (_) => AwarenessFeedController(service: awarenessFeedService),
+          update: (_, auth, controller) {
+            final awareness = controller ??
+                AwarenessFeedController(service: awarenessFeedService);
+            unawaited(awareness.bindAuthenticatedUser(auth.userId));
+            return awareness;
+          },
+        ),
+        ChangeNotifierProxyProvider<AuthController, VerificationStudioController>(
+          create: (_) => VerificationStudioController(
+            repository: verificationRepository,
+          ),
+          update: (_, auth, controller) {
+            final studio = controller ??
+                VerificationStudioController(repository: verificationRepository);
+            unawaited(studio.bindAdministrator(auth.isAdministrator));
+            return studio;
+          },
+        ),
+        ChangeNotifierProxyProvider<AuthController, SandboxController>(
+          create: (_) => SandboxController(
+            service: integrationService,
+            repository: promptCoachRepository,
+          ),
+          update: (_, auth, controller) {
+            final coach = controller ??
+                SandboxController(
+                  service: integrationService,
+                  repository: promptCoachRepository,
+                );
+            unawaited(coach.bindAuthenticatedUser(auth.userId));
+            return coach;
+          },
         ),
         ChangeNotifierProvider(create: (_) => ThemeController()..init()),
       ],

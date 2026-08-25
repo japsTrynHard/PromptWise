@@ -5,3 +5,18 @@
 
 [functions.content-automation]
 verify_jwt = false
+
+# PromptWise Phase 8 AI Coach. The function authenticates the learner JWT
+# itself before any AI request, while allowing browser preflight requests.
+[functions.promptwise-integrations]
+verify_jwt = false
+
+# Phase 9 image comparison feed. The function validates the learner JWT
+# itself and fetches fresh, source-labeled Wikimedia Commons examples.
+[functions.verification-media]
+verify_jwt = false
+
+# Phase 9 live AI Awareness feed. The function validates the signed-in user
+# itself, discovers current trusted news, and refreshes the cached feed.
+[functions.awareness-feed]
+verify_jwt = false

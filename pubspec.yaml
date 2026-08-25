@@ -1,6 +1,6 @@
 name: promptwise
 description: "Master AI Prompts & Detect Misinformation – Flutter educational app."
-publish_to: 'none'
+publish_to: "none"
 version: 1.0.0+1
 
 environment:
@@ -19,8 +19,23 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^5.0.0
+  flutter_launcher_icons: ^0.14.4
 
 flutter:
   uses-material-design: true
+
   assets:
     - assets/images/
+    - assets/branding/
+
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: true
+  image_path: "assets/branding/promptwise_app_icon_1024.png"
+  remove_alpha_ios: true
+
+  web:
+    generate: true
+    image_path: "assets/branding/promptwise_app_icon_1024.png"
+    background_color: "#FFFFFF"
+    theme_color: "#5B4CF0"
