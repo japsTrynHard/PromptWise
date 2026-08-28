@@ -133,7 +133,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
         return Scaffold(
           appBar: AppBar(
-            title: Text('Admin · ${_AdminItems.items[_index].label}'),
+            title: Text(
+              'Admin · ${_AdminItems.items[_index].label}',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
             actions: [
               IconButton(
                 tooltip: 'Sign out',

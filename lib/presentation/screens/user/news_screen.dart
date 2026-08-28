@@ -257,7 +257,6 @@ class _Header extends StatelessWidget {
             ),
             const SizedBox(height: AppSpacing.md),
             Row(
-              mainAxisSize: MainAxisSize.min,
               children: [
                 Icon(
                   Icons.public_rounded,
@@ -265,10 +264,12 @@ class _Header extends StatelessWidget {
                   color: theme.colorScheme.primary,
                 ),
                 const SizedBox(width: AppSpacing.xs),
-                Text(
-                  _updatedLabel(controller.lastUpdatedAt),
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
+                Expanded(
+                  child: Text(
+                    _updatedLabel(controller.lastUpdatedAt),
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
                   ),
                 ),
               ],

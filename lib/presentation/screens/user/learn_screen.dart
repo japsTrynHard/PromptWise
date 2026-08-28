@@ -125,6 +125,7 @@ class _LearnScreenState extends State<LearnScreen> {
                   LayoutBuilder(
                     builder: (context, constraints) {
                       final moduleFilter = DropdownButtonFormField<String?>(
+                        isExpanded: true,
                         initialValue: selectedModuleId,
                         decoration: const InputDecoration(
                           labelText: 'Module filter',

@@ -630,8 +630,17 @@ class _FreshDraftPanel extends StatelessWidget {
                     ),
                   ),
                   Chip(
-                    label: Text(
-                      '${limits.groqRequestsThisMonth}/${limits.monthlyGroqRequestCap} Groq generation requests',
+                    label: ConstrainedBox(
+                      constraints: BoxConstraints(
+                        maxWidth: (constraints.maxWidth - 56)
+                            .clamp(80.0, double.infinity)
+                            .toDouble(),
+                      ),
+                      child: Text(
+                        '${limits.groqRequestsThisMonth}/${limits.monthlyGroqRequestCap} Groq generation requests',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                   ),
                   Chip(
@@ -992,21 +1001,45 @@ class _StatusCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return AppCard(
       backgroundColor: Theme.of(context).colorScheme.surfaceContainerLow,
-      child: Row(
-        children: [
-          const Icon(Icons.fact_check_outlined),
-          const SizedBox(width: AppSpacing.md),
-          const Expanded(
-            child: Text(
-              'Verification Studio is connected. Dynamic case drafts still require administrator approval before learners can receive them.',
-            ),
-          ),
-          OutlinedButton.icon(
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          const status = Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(Icons.fact_check_outlined),
+              SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: Text(
+                  'Verification Studio is connected. Dynamic case drafts still require administrator approval before learners can receive them.',
+                ),
+              ),
+            ],
+          );
+          final refresh = OutlinedButton.icon(
             onPressed: controller.isLoading ? null : controller.refresh,
             icon: const Icon(Icons.refresh_rounded),
             label: const Text('Refresh'),
-          ),
-        ],
+          );
+
+          if (constraints.maxWidth < AppBreakpoints.compact) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                status,
+                const SizedBox(height: AppSpacing.md),
+                refresh,
+              ],
+            );
+          }
+
+          return Row(
+            children: [
+              const Expanded(child: status),
+              const SizedBox(width: AppSpacing.lg),
+              refresh,
+            ],
+          );
+        },
       ),
     );
   }
@@ -1109,14 +1142,15 @@ class _DraftCard extends StatelessWidget {
           const SizedBox(height: AppSpacing.md),
           Text(draft.summary),
           const SizedBox(height: AppSpacing.lg),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.end,
+          Wrap(
+            alignment: WrapAlignment.end,
+            spacing: AppSpacing.sm,
+            runSpacing: AppSpacing.sm,
             children: [
               TextButton(
                 onPressed: busy ? null : onReject,
                 child: const Text('Reject'),
               ),
-              const SizedBox(width: AppSpacing.sm),
               FilledButton.icon(
                 onPressed: busy ? null : onApprove,
                 icon: const Icon(Icons.fact_check_outlined),
@@ -1150,24 +1184,20 @@ class _Filters extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return AppCard(
-      child: Wrap(
-        spacing: AppSpacing.md,
-        runSpacing: AppSpacing.md,
-        crossAxisAlignment: WrapCrossAlignment.center,
-        children: [
-          SizedBox(
-            width: 300,
-            child: TextField(
-              onChanged: onQueryChanged,
-              decoration: const InputDecoration(
-                prefixIcon: Icon(Icons.search_rounded),
-                hintText: 'Search cases',
-              ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final search = TextField(
+            onChanged: onQueryChanged,
+            decoration: const InputDecoration(
+              prefixIcon: Icon(Icons.search_rounded),
+              hintText: 'Search cases',
             ),
-          ),
-          DropdownButton<VerificationSubskill?>(
-            value: subskill,
-            hint: const Text('All subskills'),
+          );
+          final subskillFilter = DropdownButtonFormField<VerificationSubskill?>(
+            key: ValueKey(subskill),
+            isExpanded: true,
+            initialValue: subskill,
+            decoration: const InputDecoration(labelText: 'Verify skill'),
             items: [
               const DropdownMenuItem<VerificationSubskill?>(
                 value: null,
@@ -1176,15 +1206,21 @@ class _Filters extends StatelessWidget {
               ...VerificationSubskill.values.map(
                 (item) => DropdownMenuItem<VerificationSubskill?>(
                   value: item,
-                  child: Text(item.label),
+                  child: Text(
+                    item.label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
               ),
             ],
             onChanged: onSubskillChanged,
-          ),
-          DropdownButton<int?>(
-            value: level,
-            hint: const Text('All levels'),
+          );
+          final levelFilter = DropdownButtonFormField<int?>(
+            key: ValueKey(level),
+            isExpanded: true,
+            initialValue: level,
+            decoration: const InputDecoration(labelText: 'Challenge level'),
             items: [
               const DropdownMenuItem<int?>(
                 value: null,
@@ -1194,8 +1230,31 @@ class _Filters extends StatelessWidget {
                 DropdownMenuItem<int?>(value: i, child: Text(_levelLabel(i))),
             ],
             onChanged: onLevelChanged,
-          ),
-        ],
+          );
+
+          if (constraints.maxWidth < 720) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                search,
+                const SizedBox(height: AppSpacing.md),
+                subskillFilter,
+                const SizedBox(height: AppSpacing.md),
+                levelFilter,
+              ],
+            );
+          }
+
+          return Row(
+            children: [
+              Expanded(flex: 2, child: search),
+              const SizedBox(width: AppSpacing.md),
+              Expanded(child: subskillFilter),
+              const SizedBox(width: AppSpacing.md),
+              Expanded(child: levelFilter),
+            ],
+          );
+        },
       ),
     );
   }

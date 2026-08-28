@@ -341,7 +341,8 @@ class _ContentSummary extends StatelessWidget {
           physics: const NeverScrollableScrollPhysics(),
           mainAxisSpacing: AppSpacing.md,
           crossAxisSpacing: AppSpacing.md,
-          childAspectRatio: columns == 1 ? 4.2 : 2.5,
+          mainAxisExtent: columns == 1 ? 104 : null,
+          childAspectRatio: 2.5,
           children: cards,
         );
       },
@@ -439,6 +440,7 @@ class _ContentToolbar extends StatelessWidget {
             ),
           );
           final type = DropdownButtonFormField<ContentType?>(
+            isExpanded: true,
             initialValue: typeFilter,
             decoration: const InputDecoration(labelText: 'Content type'),
             items: [
@@ -456,6 +458,7 @@ class _ContentToolbar extends StatelessWidget {
             onChanged: onTypeChanged,
           );
           final status = DropdownButtonFormField<ContentStatus?>(
+            isExpanded: true,
             initialValue: statusFilter,
             decoration: const InputDecoration(labelText: 'Status'),
             items: [
@@ -971,6 +974,7 @@ class _ContentEditorDialogState extends State<_ContentEditorDialog> {
                       LayoutBuilder(
                         builder: (context, constraints) {
                           final type = DropdownButtonFormField<ContentType>(
+                            isExpanded: true,
                             initialValue: _type,
                             decoration: const InputDecoration(
                               labelText: 'Content type',
@@ -1001,6 +1005,7 @@ class _ContentEditorDialogState extends State<_ContentEditorDialog> {
                                   },
                           );
                           final status = DropdownButtonFormField<ContentStatus>(
+                            isExpanded: true,
                             initialValue: _status,
                             decoration: const InputDecoration(
                               labelText: 'Status',
@@ -1065,6 +1070,7 @@ class _ContentEditorDialogState extends State<_ContentEditorDialog> {
                       ),
                       const SizedBox(height: AppSpacing.md),
                       DropdownButtonFormField<LearningTopic?>(
+                        isExpanded: true,
                         initialValue: _adaptiveTopic,
                         decoration: InputDecoration(
                           labelText: 'Adaptive learning topic',
@@ -1105,6 +1111,7 @@ class _ContentEditorDialogState extends State<_ContentEditorDialog> {
                           _type == ContentType.lesson ||
                           _type == ContentType.quiz) ...[
                         DropdownButtonFormField<int>(
+                          isExpanded: true,
                           initialValue: _learningLevel,
                           decoration: const InputDecoration(
                             labelText: 'Learning challenge level',
@@ -1253,6 +1260,7 @@ class _ContentEditorDialogState extends State<_ContentEditorDialog> {
       case ContentType.lesson:
         return [
           DropdownButtonFormField<String>(
+            isExpanded: true,
             initialValue: modules.any((item) => item.id == _parentId)
                 ? _parentId
                 : null,
@@ -1261,7 +1269,11 @@ class _ContentEditorDialogState extends State<_ContentEditorDialog> {
                 .map(
                   (item) => DropdownMenuItem(
                     value: item.id,
-                    child: Text(item.displayTitle),
+                    child: Text(
+                      item.displayTitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
                 )
                 .toList(growable: false),
@@ -1295,6 +1307,7 @@ class _ContentEditorDialogState extends State<_ContentEditorDialog> {
                 },
               );
               final quiz = DropdownButtonFormField<String?>(
+                isExpanded: true,
                 initialValue: quizzes.any((item) => item.id == _quizId)
                     ? _quizId
                     : null,
@@ -1307,7 +1320,11 @@ class _ContentEditorDialogState extends State<_ContentEditorDialog> {
                   ...quizzes.map(
                     (item) => DropdownMenuItem<String?>(
                       value: item.id,
-                      child: Text(item.displayTitle),
+                      child: Text(
+                        item.displayTitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                   ),
                 ],

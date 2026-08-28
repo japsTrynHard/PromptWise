@@ -424,25 +424,34 @@ class _AutomationCard extends StatelessWidget {
     final settings = controller.settings;
     final queue = controller.queueHealth;
     return AppCard(
-      padding: const EdgeInsets.all(AppSpacing.xxl),
+      padding: EdgeInsets.all(
+        AdaptiveLayout.isPhone(context) ? AppSpacing.lg : AppSpacing.xxl,
+      ),
       backgroundColor: Theme.of(context).colorScheme.primaryContainer.withValues(
             alpha: Theme.of(context).brightness == Brightness.dark ? 0.18 : 0.4,
           ),
       child: LayoutBuilder(
         builder: (context, constraints) {
+          final compact = constraints.maxWidth < AppBreakpoints.compact;
           final info = Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Icon(
                     Icons.auto_awesome_outlined,
                     color: Theme.of(context).colorScheme.primary,
                   ),
                   const SizedBox(width: AppSpacing.sm),
-                  Text(
-                    'Continuous content automation',
-                    style: Theme.of(context).textTheme.titleLarge,
+                  Expanded(
+                    child: Text(
+                      'Continuous content automation',
+                      style: (compact
+                              ? Theme.of(context).textTheme.titleMedium
+                              : Theme.of(context).textTheme.titleLarge)
+                          ?.copyWith(fontWeight: FontWeight.w800),
+                    ),
                   ),
                 ],
               ),
@@ -937,14 +946,15 @@ class _DraftCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: AppSpacing.lg),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.end,
+          Wrap(
+            alignment: WrapAlignment.end,
+            spacing: AppSpacing.sm,
+            runSpacing: AppSpacing.sm,
             children: [
               TextButton(
                 onPressed: busy ? null : onReject,
                 child: const Text('Reject'),
               ),
-              const SizedBox(width: AppSpacing.sm),
               FilledButton.icon(
                 onPressed: busy ? null : onPublish,
                 icon: const Icon(Icons.playlist_add_check_rounded),
@@ -1005,14 +1015,15 @@ class _QuestionReviewCard extends StatelessWidget {
                 ),
           ),
           const SizedBox(height: AppSpacing.md),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.end,
+          Wrap(
+            alignment: WrapAlignment.end,
+            spacing: AppSpacing.sm,
+            runSpacing: AppSpacing.sm,
             children: [
               TextButton(
                 onPressed: busy ? null : onReject,
                 child: const Text('Reject'),
               ),
-              const SizedBox(width: AppSpacing.sm),
               FilledButton.icon(
                 onPressed: busy ? null : onReview,
                 icon: const Icon(Icons.fact_check_outlined),
@@ -1150,6 +1161,7 @@ class _QuestionReviewDialogState extends State<_QuestionReviewDialog> {
                         children: [
                           Expanded(
                             child: DropdownButtonFormField<int>(
+                              isExpanded: true,
                               initialValue: _difficulty,
                               decoration: const InputDecoration(
                                 labelText: 'Challenge level',
@@ -1173,6 +1185,7 @@ class _QuestionReviewDialogState extends State<_QuestionReviewDialog> {
                           const SizedBox(width: AppSpacing.md),
                           Expanded(
                             child: DropdownButtonFormField<String>(
+                              isExpanded: true,
                               initialValue: _questionType,
                               decoration: const InputDecoration(
                                 labelText: 'Question type',
@@ -1367,8 +1380,8 @@ class _ApprovedQuestionBankBrowserState
             runSpacing: AppSpacing.md,
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
-              SizedBox(
-                width: 320,
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 320),
                 child: TextField(
                   controller: _searchController,
                   onChanged: (_) => setState(() {}),
@@ -1379,9 +1392,10 @@ class _ApprovedQuestionBankBrowserState
                   ),
                 ),
               ),
-              SizedBox(
-                width: 220,
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 220),
                 child: DropdownButtonFormField<LearningTopic?>(
+                  isExpanded: true,
                   initialValue: _topic,
                   decoration: const InputDecoration(labelText: 'Topic'),
                   items: [
@@ -1399,9 +1413,10 @@ class _ApprovedQuestionBankBrowserState
                   onChanged: (value) => setState(() => _topic = value),
                 ),
               ),
-              SizedBox(
-                width: 190,
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 190),
                 child: DropdownButtonFormField<int?>(
+                  isExpanded: true,
                   initialValue: _difficulty,
                   decoration: const InputDecoration(labelText: 'Level'),
                   items: [

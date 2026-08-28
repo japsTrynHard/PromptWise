@@ -262,7 +262,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                             destinations: _destinations,
                             onSelected: _select,
                             minimized: minimized,
-                            showSelectedLabel: constraints.maxWidth >= 420,
+                            showSelectedLabel: false,
                           ),
                     ),
                   ),

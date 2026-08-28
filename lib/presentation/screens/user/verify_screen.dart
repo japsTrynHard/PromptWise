@@ -208,34 +208,53 @@ class _ImageCompareFeature extends StatelessWidget {
       ),
       child: LayoutBuilder(
         builder: (context, constraints) {
+          final icon = Container(
+            padding: const EdgeInsets.all(AppSpacing.sm),
+            decoration: BoxDecoration(
+              color: theme.colorScheme.primary.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(AppRadius.md),
+            ),
+            child: Icon(
+              Icons.image_search_rounded,
+              color: theme.colorScheme.primary,
+            ),
+          );
+          final title = Expanded(
+            child: Text(
+              'Compare Images',
+              style: theme.textTheme.headlineSmall?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          );
+          final titleRow = Row(
+            children: [
+              icon,
+              const SizedBox(width: AppSpacing.md),
+              title,
+            ],
+          );
+          final heading = constraints.maxWidth < 420
+              ? Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    titleRow,
+                    const SizedBox(height: AppSpacing.sm),
+                    const Chip(label: Text('Fresh online images')),
+                  ],
+                )
+              : Row(
+                  children: [
+                    icon,
+                    const SizedBox(width: AppSpacing.md),
+                    title,
+                    const Chip(label: Text('Fresh online images')),
+                  ],
+                );
           final text = Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(AppSpacing.sm),
-                    decoration: BoxDecoration(
-                      color: theme.colorScheme.primary.withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(AppRadius.md),
-                    ),
-                    child: Icon(
-                      Icons.image_search_rounded,
-                      color: theme.colorScheme.primary,
-                    ),
-                  ),
-                  const SizedBox(width: AppSpacing.md),
-                  Expanded(
-                    child: Text(
-                      'Compare Images',
-                      style: theme.textTheme.headlineSmall?.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-                  const Chip(label: Text('Fresh online images')),
-                ],
-              ),
+              heading,
               const SizedBox(height: AppSpacing.md),
               Text(
                 'Pick which image was marked as AI-made. The examples are pulled from online source information, so the set can change instead of repeating the same pictures every time.',
@@ -361,22 +380,42 @@ class _FriendlyProgressCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  attempts == 0
-                      ? 'You are just getting started'
-                      : '$average% overall progress',
-                  style: theme.textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final title = Text(
+                attempts == 0
+                    ? 'You are just getting started'
+                    : '$average% overall progress',
+                style: theme.textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.w700,
                 ),
-              ),
-              Text(
+              );
+              final count = Text(
                 '$attempts practice ${attempts == 1 ? 'answer' : 'answers'}',
-              ),
-            ],
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              );
+
+              if (constraints.maxWidth < 420) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    title,
+                    const SizedBox(height: AppSpacing.xs),
+                    count,
+                  ],
+                );
+              }
+
+              return Row(
+                children: [
+                  Expanded(child: title),
+                  const SizedBox(width: AppSpacing.md),
+                  count,
+                ],
+              );
+            },
           ),
           const SizedBox(height: AppSpacing.md),
           LinearProgressIndicator(value: attempts == 0 ? 0 : average / 100),
