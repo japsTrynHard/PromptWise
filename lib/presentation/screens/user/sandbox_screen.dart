@@ -75,6 +75,7 @@ class _SandboxScreenState extends State<SandboxScreen> {
     final followUps = <Future<void>>[];
     if (coach.masteryEvidenceCount > 0) {
       followUps.add(adaptive.refreshFromCloud());
+      followUps.add(progression.refresh());
     }
     if (score >= 80) {
       followUps.add(progress.addSandboxBadge());
@@ -114,7 +115,9 @@ class _SandboxScreenState extends State<SandboxScreen> {
     const example =
         'Explain how phishing works for senior high school students. Give three warning signs in a short table, then provide a four-step verification checklist. Use simple language, avoid invented statistics, and clearly mark claims that should be checked against trusted cybersecurity sources.';
     _promptController.text = example;
-    _promptController.selection = TextSelection.collapsed(offset: example.length);
+    _promptController.selection = TextSelection.collapsed(
+      offset: example.length,
+    );
     final state = context.read<SandboxController>();
     state.clearValidationMessage();
     state.inspectPrompt(example);
@@ -164,7 +167,8 @@ class _SandboxScreenState extends State<SandboxScreen> {
       appBar: PromptWiseAppBar(
         eyebrow: 'COACH · PRACTICE',
         title: 'Prompt Coach',
-        subtitle: 'Improve your own prompt with guided feedback, one revision at a time.',
+        subtitle:
+            'Improve your own prompt with guided feedback, one revision at a time.',
         backTooltip: 'Back',
         actions: [
           PromptWiseHeaderIconButton(
@@ -189,11 +193,13 @@ class _SandboxScreenState extends State<SandboxScreen> {
                     delegate: SliverChildListDelegate([
                       if (!AdaptiveLayout.isPhone(context)) ...[
                         PageIntro(
-                          title: 'Build better prompts by revising them yourself',
+                          title:
+                              'Build better prompts by revising them yourself',
                           description:
                               'PromptWise scores the same eight prompt skills every time, asks guiding questions, and tracks your improvement. AI Coach adds contextual guidance but never rewrites the prompt or completes the task for you.',
-                          trailing:
-                              _RankBadge(label: progression.overallRankLabel),
+                          trailing: _RankBadge(
+                            label: progression.overallRankLabel,
+                          ),
                         ),
                         const SizedBox(height: AppSpacing.xl),
                       ],
@@ -446,9 +452,9 @@ class _LearningContextCard extends StatelessWidget {
               children: [
                 Text(
                   'Personalized coaching context',
-                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
                 ),
                 const SizedBox(height: AppSpacing.xs),
                 Text(
@@ -660,9 +666,9 @@ class _PrivacyWarningCard extends StatelessWidget {
             ),
           Text(
             'Standard Coach can still evaluate prompt structure locally. AI Coach will not receive the prompt until blocking findings are removed.',
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: scheme.onSurfaceVariant,
-            ),
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
           ),
         ],
       ),
@@ -696,9 +702,9 @@ class _RevisionProgressCard extends StatelessWidget {
             children: [
               Text(
                 'Revision progress',
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w700,
-                ),
+                style: Theme.of(
+                  context,
+                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
               ),
               const SizedBox(height: AppSpacing.xs),
               Text(
@@ -777,9 +783,9 @@ class _ScorePill extends StatelessWidget {
           Text(label, style: Theme.of(context).textTheme.labelSmall),
           Text(
             '$value',
-            style: Theme.of(context).textTheme.titleLarge?.copyWith(
-              fontWeight: FontWeight.w800,
-            ),
+            style: Theme.of(
+              context,
+            ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
           ),
         ],
       ),
@@ -827,7 +833,8 @@ class _StandardFeedbackGrid extends StatelessWidget {
                 icon: Icons.help_outline_rounded,
                 title: 'Guiding questions',
                 items: analysis.guidingQuestions,
-                emptyText: 'Use the score breakdown to choose one area to refine.',
+                emptyText:
+                    'Use the score breakdown to choose one area to refine.',
               ),
             ),
             SizedBox(
@@ -842,18 +849,17 @@ class _StandardFeedbackGrid extends StatelessWidget {
                         const SizedBox(width: AppSpacing.sm),
                         Text(
                           'Coach summary',
-                          style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w700,
-                          ),
+                          style: Theme.of(context).textTheme.titleMedium
+                              ?.copyWith(fontWeight: FontWeight.w700),
                         ),
                       ],
                     ),
                     const SizedBox(height: AppSpacing.md),
                     Text(
                       analysis.summary,
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        height: 1.5,
-                      ),
+                      style: Theme.of(
+                        context,
+                      ).textTheme.bodyMedium?.copyWith(height: 1.5),
                     ),
                   ],
                 ),
@@ -906,10 +912,7 @@ class _FeedbackCard extends StatelessWidget {
             for (final item in items)
               Padding(
                 padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-                child: _BulletLine(
-                  icon: Icons.arrow_right_rounded,
-                  text: item,
-                ),
+                child: _BulletLine(icon: Icons.arrow_right_rounded, text: item),
               ),
         ],
       ),
@@ -937,9 +940,9 @@ class _AiGuidanceCard extends StatelessWidget {
               Expanded(
                 child: Text(
                   'AI Coach perspective',
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
                 ),
               ),
               const Chip(label: Text('Guidance only')),
@@ -954,15 +957,17 @@ class _AiGuidanceCard extends StatelessWidget {
             const SizedBox(height: AppSpacing.lg),
             Text(
               'Focus areas',
-              style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                fontWeight: FontWeight.w700,
-              ),
+              style: Theme.of(
+                context,
+              ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: AppSpacing.sm),
             Wrap(
               spacing: AppSpacing.sm,
               runSpacing: AppSpacing.sm,
-              children: [for (final item in guidance.focusAreas) Chip(label: Text(item))],
+              children: [
+                for (final item in guidance.focusAreas) Chip(label: Text(item)),
+              ],
             ),
           ],
           if (guidance.reasoningNotes.isNotEmpty) ...[
@@ -980,9 +985,9 @@ class _AiGuidanceCard extends StatelessWidget {
             const SizedBox(height: AppSpacing.md),
             Text(
               'Questions to answer in your revision',
-              style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                fontWeight: FontWeight.w700,
-              ),
+              style: Theme.of(
+                context,
+              ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: AppSpacing.sm),
             for (final question in guidance.guidingQuestions)
@@ -1005,9 +1010,9 @@ class _AiGuidanceCard extends StatelessWidget {
             const SizedBox(height: AppSpacing.sm),
             Text(
               guidance.responsibleUseReminder,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: scheme.onSurfaceVariant,
-              ),
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
             ),
           ],
         ],
@@ -1028,7 +1033,9 @@ class _RevisionCallToAction extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return AppCard(
-      backgroundColor: Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.38),
+      backgroundColor: Theme.of(
+        context,
+      ).colorScheme.primaryContainer.withValues(alpha: 0.38),
       child: LayoutBuilder(
         builder: (context, constraints) {
           final copy = Column(
@@ -1036,14 +1043,16 @@ class _RevisionCallToAction extends StatelessWidget {
             children: [
               Text(
                 'Your turn: revise it yourself',
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w700,
-                ),
+                style: Theme.of(
+                  context,
+                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
               ),
               const SizedBox(height: AppSpacing.xs),
               Text(
                 'Use one or two pieces of feedback, make the changes in your own words, then review the next revision. PromptWise intentionally does not provide a finished rewritten prompt.',
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(height: 1.45),
+                style: Theme.of(
+                  context,
+                ).textTheme.bodyMedium?.copyWith(height: 1.45),
               ),
             ],
           );
@@ -1065,7 +1074,11 @@ class _RevisionCallToAction extends StatelessWidget {
           if (constraints.maxWidth < 650) {
             return Column(
               crossAxisAlignment: CrossAxisAlignment.start,
-              children: [copy, const SizedBox(height: AppSpacing.md), actions],
+              children: [
+                copy,
+                const SizedBox(height: AppSpacing.md),
+                actions,
+              ],
             );
           }
           return Row(
@@ -1171,16 +1184,19 @@ class _HistorySection extends StatelessWidget {
                               session.title,
                               maxLines: 2,
                               overflow: TextOverflow.ellipsis,
-                              style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                                fontWeight: FontWeight.w700,
-                              ),
+                              style: Theme.of(context).textTheme.titleSmall
+                                  ?.copyWith(fontWeight: FontWeight.w700),
                             ),
                             const SizedBox(height: AppSpacing.sm),
                             Wrap(
                               spacing: AppSpacing.sm,
                               runSpacing: AppSpacing.xs,
                               children: [
-                                Chip(label: Text('${session.revisionCount} revisions')),
+                                Chip(
+                                  label: Text(
+                                    '${session.revisionCount} revisions',
+                                  ),
+                                ),
                                 if (session.focusTopic != null)
                                   Chip(label: Text(session.focusTopic!.label)),
                                 Chip(
@@ -1226,9 +1242,9 @@ class _HistoryRevisionCard extends StatelessWidget {
               Expanded(
                 child: Text(
                   'Revision ${revision.revisionNumber}',
-                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
                 ),
               ),
               Text('${revision.scores.overallPercent}/100'),
@@ -1239,7 +1255,9 @@ class _HistoryRevisionCard extends StatelessWidget {
           const SizedBox(height: AppSpacing.sm),
           SelectableText(
             revision.promptText,
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(height: 1.45),
+            style: Theme.of(
+              context,
+            ).textTheme.bodyMedium?.copyWith(height: 1.45),
           ),
         ],
       ),
@@ -1265,9 +1283,9 @@ class _RankBadge extends StatelessWidget {
       ),
       child: Text(
         label,
-        style: Theme.of(context).textTheme.labelMedium?.copyWith(
-          fontWeight: FontWeight.w700,
-        ),
+        style: Theme.of(
+          context,
+        ).textTheme.labelMedium?.copyWith(fontWeight: FontWeight.w700),
       ),
     );
   }
@@ -1295,7 +1313,9 @@ class _InlineNotice extends StatelessWidget {
           Expanded(
             child: Text(
               message,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(height: 1.4),
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(height: 1.4),
             ),
           ),
         ],
@@ -1322,7 +1342,9 @@ class _BulletLine extends StatelessWidget {
           child: title == null
               ? Text(
                   text,
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(height: 1.4),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodyMedium?.copyWith(height: 1.4),
                 )
               : Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -1336,7 +1358,9 @@ class _BulletLine extends StatelessWidget {
                     const SizedBox(height: 2),
                     Text(
                       text,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(height: 1.4),
+                      style: Theme.of(
+                        context,
+                      ).textTheme.bodySmall?.copyWith(height: 1.4),
                     ),
                   ],
                 ),

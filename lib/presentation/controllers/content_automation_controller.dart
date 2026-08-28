@@ -7,9 +7,12 @@ class ContentAutomationController extends ChangeNotifier {
   final ContentAutomationRepository? _repository;
 
   ContentAutomationController({ContentAutomationRepository? repository})
-      : _repository = repository;
+    : _repository = repository;
 
   bool _isAdministrator = false;
+  String? _administratorUserId;
+  int _adminEpoch = 0;
+  bool _disposed = false;
   bool _isLoading = false;
   bool _isMutating = false;
   bool _hasLoaded = false;
@@ -39,9 +42,13 @@ class ContentAutomationController extends ChangeNotifier {
   AutomationSettings get settings => _settings;
   QueueLifecycleStats get queueHealth => _queueHealth;
 
-  Future<void> bindAdministrator(bool isAdministrator) async {
-    final roleChanged = _isAdministrator != isAdministrator;
+  Future<void> bindAdministrator(bool isAdministrator, {String? userId}) async {
+    if (_disposed) return;
+    final roleChanged =
+        _isAdministrator != isAdministrator || _administratorUserId != userId;
     _isAdministrator = isAdministrator;
+    _administratorUserId = isAdministrator ? userId : null;
+    if (roleChanged) _adminEpoch++;
 
     if (!isAdministrator) {
       _sources = const [];
@@ -54,6 +61,8 @@ class ContentAutomationController extends ChangeNotifier {
       _errorMessage = null;
       _successMessage = null;
       _hasLoaded = false;
+      _isLoading = false;
+      _isMutating = false;
       notifyListeners();
       return;
     }
@@ -69,6 +78,7 @@ class ContentAutomationController extends ChangeNotifier {
   Future<void> refresh() async {
     final repository = _repository;
     if (!_isAdministrator || repository == null || _isLoading) return;
+    final epoch = _adminEpoch;
 
     _isLoading = true;
     _errorMessage = null;
@@ -78,54 +88,68 @@ class ContentAutomationController extends ChangeNotifier {
 
     // These sections are independent. Start all reads together to reduce the
     // total network wait from seven sequential round trips to roughly one.
-    final settingsFuture = repository.fetchSettings();
-    final healthFuture = repository.fetchContentHealth();
-    final draftsFuture = repository.fetchDrafts();
-    final reviewFuture = repository.fetchQuestionReviewQueue();
-    final approvedFuture = repository.fetchApprovedQuestions();
-    final sourcesFuture = repository.fetchSources();
-    final queueFuture = repository.fetchQueueHealth();
+    final settingsFuture = _capture(repository.fetchSettings());
+    final healthFuture = _capture(repository.fetchContentHealth());
+    final draftsFuture = _capture(repository.fetchDrafts());
+    final reviewFuture = _capture(repository.fetchQuestionReviewQueue());
+    final approvedFuture = _capture(repository.fetchApprovedQuestions());
+    final sourcesFuture = _capture(repository.fetchSources());
+    final queueFuture = _capture(repository.fetchQueueHealth());
 
     try {
-      try {
-        _settings = await settingsFuture;
-      } catch (_) {
+      final settingsResult = await settingsFuture;
+      if (!_isCurrentAdmin(epoch)) return;
+      if (settingsResult.value != null) {
+        _settings = settingsResult.value!;
+      } else {
         failedSections.add('automation settings');
       }
 
-      try {
-        _health = await healthFuture;
-      } catch (_) {
+      final healthResult = await healthFuture;
+      if (!_isCurrentAdmin(epoch)) return;
+      if (healthResult.value != null) {
+        _health = healthResult.value!;
+      } else {
         failedSections.add('content health');
       }
 
-      try {
-        _drafts = await draftsFuture;
-      } catch (_) {
+      final draftsResult = await draftsFuture;
+      if (!_isCurrentAdmin(epoch)) return;
+      if (draftsResult.value != null) {
+        _drafts = draftsResult.value!;
+      } else {
         failedSections.add('generated drafts');
       }
 
-      try {
-        _questionReviewQueue = await reviewFuture;
-      } catch (_) {
+      final reviewResult = await reviewFuture;
+      if (!_isCurrentAdmin(epoch)) return;
+      if (reviewResult.value != null) {
+        _questionReviewQueue = reviewResult.value!;
+      } else {
         failedSections.add('question review queue');
       }
 
-      try {
-        _approvedQuestions = await approvedFuture;
-      } catch (_) {
+      final approvedResult = await approvedFuture;
+      if (!_isCurrentAdmin(epoch)) return;
+      if (approvedResult.value != null) {
+        _approvedQuestions = approvedResult.value!;
+      } else {
         failedSections.add('approved question bank');
       }
 
-      try {
-        _sources = await sourcesFuture;
-      } catch (_) {
+      final sourcesResult = await sourcesFuture;
+      if (!_isCurrentAdmin(epoch)) return;
+      if (sourcesResult.value != null) {
+        _sources = sourcesResult.value!;
+      } else {
         failedSections.add('trusted sources');
       }
 
-      try {
-        _queueHealth = await queueFuture;
-      } catch (_) {
+      final queueResult = await queueFuture;
+      if (!_isCurrentAdmin(epoch)) return;
+      if (queueResult.value != null) {
+        _queueHealth = queueResult.value!;
+      } else {
         _queueHealth = QueueLifecycleStats.empty();
         failedSections.add('queue lifecycle');
       }
@@ -136,14 +160,17 @@ class ContentAutomationController extends ChangeNotifier {
             'Learning Studio opened, but some online sections could not load: ${failedSections.join(', ')}. Check the Phase 7 Supabase policies/data, then retry.';
       }
     } finally {
-      _isLoading = false;
-      notifyListeners();
+      if (_isCurrentAdmin(epoch)) {
+        _isLoading = false;
+        notifyListeners();
+      }
     }
   }
 
   Future<bool> setSourceEnabled(String sourceId, bool enabled) async {
-    return _mutate(() async {
+    return _mutate((isCurrent) async {
       await _requireRepository().setSourceEnabled(sourceId, enabled);
+      if (!isCurrent()) return;
       _sources = _sources
           .map(
             (source) => source.id == sourceId
@@ -173,7 +200,7 @@ class ContentAutomationController extends ChangeNotifier {
     required int maxPendingQuestions,
     required int draftArchiveDays,
   }) async {
-    return _mutate(() async {
+    return _mutate((isCurrent) async {
       await _requireRepository().updateSettings(
         enabled: enabled,
         maxArticlesPerRun: maxArticlesPerRun,
@@ -183,6 +210,7 @@ class ContentAutomationController extends ChangeNotifier {
         maxPendingQuestions: maxPendingQuestions,
         draftArchiveDays: draftArchiveDays,
       );
+      if (!isCurrent()) return;
       _settings = AutomationSettings(
         enabled: enabled,
         maxArticlesPerRun: maxArticlesPerRun,
@@ -213,16 +241,18 @@ class ContentAutomationController extends ChangeNotifier {
   }
 
   Future<bool> runNow() async {
-    return _mutate(() async {
+    return _mutate((isCurrent) async {
       final message = await _requireRepository().runAutomationNow();
+      if (!isCurrent()) return;
       _successMessage = message;
       await refresh();
     });
   }
 
   Future<bool> runVerificationDraftsNow() async {
-    return _mutate(() async {
+    return _mutate((isCurrent) async {
       final message = await _requireRepository().runVerificationDraftsNow();
+      if (!isCurrent()) return;
       _successMessage = message;
       // Verification Studio owns the Verify draft/case data and refreshes only
       // those sections after generation. Do not reload all seven Learning
@@ -231,8 +261,9 @@ class ContentAutomationController extends ChangeNotifier {
   }
 
   Future<bool> publishDraft(String draftId) async {
-    return _mutate(() async {
+    return _mutate((isCurrent) async {
       await _requireRepository().publishDraft(draftId);
+      if (!isCurrent()) return;
       _successMessage =
           'Draft approved to Content Management. It is still a draft and is not learner-visible yet.';
       await refresh();
@@ -240,16 +271,18 @@ class ContentAutomationController extends ChangeNotifier {
   }
 
   Future<bool> rejectDraft(String draftId) async {
-    return _mutate(() async {
+    return _mutate((isCurrent) async {
       await _requireRepository().rejectDraft(draftId);
+      if (!isCurrent()) return;
       _successMessage = 'Draft rejected.';
       await refresh();
     });
   }
 
   Future<bool> verifyQuestion(QuestionBankReviewItem question) async {
-    return _mutate(() async {
+    return _mutate((isCurrent) async {
       await _requireRepository().verifyQuestion(question);
+      if (!isCurrent()) return;
       _successMessage =
           'Question verified. It will become learner-visible when its linked lesson is published.';
       await refresh();
@@ -257,8 +290,9 @@ class ContentAutomationController extends ChangeNotifier {
   }
 
   Future<bool> rejectQuestion(String questionId) async {
-    return _mutate(() async {
+    return _mutate((isCurrent) async {
       await _requireRepository().rejectQuestion(questionId);
+      if (!isCurrent()) return;
       _successMessage = 'Question rejected and archived.';
       await refresh();
     });
@@ -271,21 +305,32 @@ class ContentAutomationController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<bool> _mutate(Future<void> Function() operation) async {
+  Future<bool> _mutate(
+    Future<void> Function(bool Function() isCurrent) operation,
+  ) async {
     if (_isMutating || !_isAdministrator || _repository == null) return false;
+    final epoch = _adminEpoch;
     _isMutating = true;
     _errorMessage = null;
     _successMessage = null;
     notifyListeners();
     try {
-      await operation();
+      await operation(() => _isCurrentAdmin(epoch));
+      if (!_isCurrentAdmin(epoch)) return false;
       return true;
-    } catch (error) {
-      _errorMessage = _friendlyMessage(error);
+    } catch (error, stackTrace) {
+      if (kDebugMode) {
+        debugPrint('Learning Studio mutation failed: $error\n$stackTrace');
+      }
+      if (_isCurrentAdmin(epoch)) {
+        _errorMessage = _friendlyMessage(error);
+      }
       return false;
     } finally {
-      _isMutating = false;
-      notifyListeners();
+      if (_isCurrentAdmin(epoch)) {
+        _isMutating = false;
+        notifyListeners();
+      }
     }
   }
 
@@ -328,4 +373,41 @@ class ContentAutomationController extends ChangeNotifier {
     if (raw.isNotEmpty && raw.length <= 360) return raw;
     return 'The Learning Studio action could not be completed.';
   }
+
+  bool _isCurrentAdmin(int epoch) =>
+      !_disposed &&
+      _isAdministrator &&
+      _administratorUserId != null &&
+      _adminEpoch == epoch;
+
+  Future<_AdminLoadResult<T>> _capture<T>(Future<T> request) async {
+    try {
+      return _AdminLoadResult<T>.success(await request);
+    } catch (error, stackTrace) {
+      if (kDebugMode) {
+        debugPrint('Learning Studio section failed: $error\n$stackTrace');
+      }
+      return _AdminLoadResult<T>.failure(error);
+    }
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    _adminEpoch++;
+    super.dispose();
+  }
+}
+
+class _AdminLoadResult<T> {
+  final T? value;
+  final Object? error;
+
+  const _AdminLoadResult._(this.value, this.error);
+
+  factory _AdminLoadResult.success(T value) =>
+      _AdminLoadResult<T>._(value, null);
+
+  factory _AdminLoadResult.failure(Object error) =>
+      _AdminLoadResult<T>._(null, error);
 }

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -6,6 +8,7 @@ import '../../controllers/auth_controller.dart';
 import '../../controllers/awareness_feed_controller.dart';
 import '../../controllers/content_controller.dart';
 import '../../controllers/progress_controller.dart';
+import '../../controllers/learning_progression_controller.dart';
 import '../../../data/models/learning_topic.dart';
 import '../../../data/models/lesson.dart';
 import '../../../core/routes/app_routes.dart';
@@ -25,6 +28,8 @@ class HomeScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final auth = context.watch<AuthController>();
     final progressController = context.watch<ProgressController>();
+    final progression = context.watch<LearningProgressionController>();
+    unawaited(progression.ensureLoaded());
     final progress = progressController.progress;
     final content = context.watch<ContentController>();
     final awarenessFeed = context.watch<AwarenessFeedController>();
@@ -86,14 +91,12 @@ class HomeScreen extends StatelessWidget {
                 final masteryCard = _MasteryCard(
                   completed: progress.completedLessons,
                   total: progress.totalLessons,
-                  level: progress.knowledgeLevel,
+                  rank: progression.overallRankLabel,
                   adaptiveMastery: adaptive.overallMastery,
                   diagnosticCompleted: adaptive.diagnosticCompleted,
                   weakestTopic: adaptive.weakestTopic?.label,
-                  onTap: () => Navigator.pushNamed(
-                    context,
-                    AppRoutes.adaptiveLearning,
-                  ),
+                  onTap: () =>
+                      Navigator.pushNamed(context, AppRoutes.adaptiveLearning),
                 );
                 final actionCard = _RecommendedActionCard(
                   recommendation: recommendation,
@@ -127,7 +130,8 @@ class HomeScreen extends StatelessWidget {
             const SizedBox(height: AppSpacing.section),
             SectionHeader(
               title: 'AI updates right now',
-              subtitle: 'Fresh AI, deepfake, AI scam, and AI misinformation updates.',
+              subtitle:
+                  'Fresh AI, deepfake, AI scam, and AI misinformation updates.',
               actionLabel: 'View all',
               onAction: () => Navigator.pushNamed(context, AppRoutes.awareness),
             ),
@@ -141,7 +145,8 @@ class HomeScreen extends StatelessWidget {
                 : _AwarenessPreview(
                     title: awareness.first.title,
                     summary: awareness.first.summary,
-                    date: '${awareness.first.sourceName} · ${_awarenessDate(awareness.first.publishedAt)}',
+                    date:
+                        '${awareness.first.sourceName} · ${_awarenessDate(awareness.first.publishedAt)}',
                     onTap: () =>
                         Navigator.pushNamed(context, AppRoutes.awareness),
                   ),
@@ -185,7 +190,8 @@ class HomeScreen extends StatelessWidget {
             );
           }
         }
-        if (topic == LearningTopic.verification && content.activities.isNotEmpty) {
+        if (topic == LearningTopic.verification &&
+            content.activities.isNotEmpty) {
           return _Recommendation(
             title: 'Review verification',
             description:
@@ -275,7 +281,8 @@ class HomeScreen extends StatelessWidget {
 
     for (final quiz in content.quizzes) {
       final quizTopic = quiz.topic;
-      final canUseNow = quizTopic == null ||
+      final canUseNow =
+          quizTopic == null ||
           adaptive.canCountEvidenceNow(itemId: quiz.id, topic: quizTopic);
       if (progress.bestScoreForQuiz(quiz.id) < 100 && canUseNow) {
         return _Recommendation(
@@ -446,7 +453,7 @@ class _ContinueLearningCard extends StatelessWidget {
 class _MasteryCard extends StatelessWidget {
   final int completed;
   final int total;
-  final String level;
+  final String rank;
   final int adaptiveMastery;
   final bool diagnosticCompleted;
   final String? weakestTopic;
@@ -455,7 +462,7 @@ class _MasteryCard extends StatelessWidget {
   const _MasteryCard({
     required this.completed,
     required this.total,
-    required this.level,
+    required this.rank,
     required this.adaptiveMastery,
     required this.diagnosticCompleted,
     required this.weakestTopic,
@@ -484,7 +491,7 @@ class _MasteryCard extends StatelessWidget {
               const SizedBox(height: AppSpacing.md),
               Chip(
                 avatar: const Icon(Icons.school_outlined, size: 18),
-                label: Text(level),
+                label: Text(rank),
               ),
               const SizedBox(height: AppSpacing.sm),
               Text(

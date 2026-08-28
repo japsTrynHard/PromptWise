@@ -73,7 +73,8 @@ class ProgressController extends ChangeNotifier {
       _progress = _readLocalProgress(prefix: '');
       _updateLevelInMemory();
       await _persistLocal(prefix: '', clearLegacyScore: true);
-    } catch (_) {
+    } catch (error, stackTrace) {
+      _debugFailure('Local progress load', error, stackTrace);
       _errorMessage =
           'Your progress could not be loaded. You can continue, but changes may not be saved on this device.';
     } finally {
@@ -133,7 +134,10 @@ class ProgressController extends ChangeNotifier {
     try {
       final accountLocal = _readLocalProgress(prefix: prefix);
       final legacyOwner = _storage.getString(_legacyProgressOwnerKey);
-      final canMigrateLegacy = legacyOwner.isEmpty || legacyOwner == userId;
+      // Unowned device progress must never be claimed by whichever account
+      // happens to sign in first. Only exact-ID legacy state with an explicit
+      // matching owner is eligible for account migration.
+      final canMigrateLegacy = legacyOwner == userId;
       final legacyLocal = canMigrateLegacy
           ? _readLocalProgress(prefix: '')
           : UserProgress.initial(totalLessons: _lessonIds.length);
@@ -142,9 +146,6 @@ class ProgressController extends ChangeNotifier {
       _progress = _sanitizeProgress(merged);
       _updateLevelInMemory();
       await _persistLocal(prefix: prefix);
-      if (legacyOwner.isEmpty) {
-        await _storage.setString(_legacyProgressOwnerKey, userId);
-      }
 
       final remote = _remoteRepository == null
           ? null
@@ -175,13 +176,15 @@ class ProgressController extends ChangeNotifier {
         _syncState = ProgressSyncState.synced;
         _lastSyncedAt = DateTime.now();
       }
-    } catch (_) {
+    } catch (error, stackTrace) {
+      _debugFailure('Account progress bind', error, stackTrace);
       if (_activeUserId != userId) return;
       _progress = _sanitizeProgress(_readLocalProgress(prefix: prefix));
       _updateLevelInMemory();
       _syncState = ProgressSyncState.error;
-      _errorMessage =
-          'You appear to be offline. Your progress is saved on this device and will update online after you reconnect.';
+      _errorMessage = _isConnectionFailure(error)
+          ? 'You appear to be offline. Your progress is saved on this device and will update online after you reconnect.'
+          : 'Your device progress is safe, but the account progress service rejected the latest synchronization.';
     } finally {
       if (_activeUserId == userId) {
         _isLoading = false;
@@ -233,11 +236,13 @@ class ProgressController extends ChangeNotifier {
       }
       _syncState = ProgressSyncState.synced;
       _lastSyncedAt = DateTime.now();
-    } catch (_) {
+    } catch (error, stackTrace) {
+      _debugFailure('Cloud progress refresh', error, stackTrace);
       if (_activeUserId == userId) {
         _syncState = ProgressSyncState.error;
-        _errorMessage =
-            'Your saved progress is available, but the latest online progress could not be refreshed.';
+        _errorMessage = _isConnectionFailure(error)
+            ? 'Your saved progress is available, but the latest online progress could not be reached.'
+            : 'Your saved progress is available, but the account progress response could not be applied.';
       }
     } finally {
       if (_activeUserId == userId) {
@@ -315,19 +320,15 @@ class ProgressController extends ChangeNotifier {
     final storedCompleted = _storage.getStringList(
       '$prefix$_completedLessonsKey',
     );
-    final completed = (_lessonIds.isEmpty
-            ? storedCompleted
-            : storedCompleted.where(_lessonIds.contains))
-        .toSet()
-        .toList(growable: false);
+    final completed =
+        (_lessonIds.isEmpty
+                ? storedCompleted
+                : storedCompleted.where(_lessonIds.contains))
+            .toSet()
+            .toList(growable: false);
     var quizScores = _sanitizeQuizScores(
       _storage.getIntMap('$prefix$_quizBestScoresKey'),
     );
-    if (prefix.isEmpty && quizScores.isEmpty) {
-      quizScores = _migrateLegacyQuizScore(
-        _storage.getInt(_legacyQuizScoreKey),
-      );
-    }
     final badges = _storage
         .getStringList('$prefix$_badgesKey')
         .map(ProgressBadges.normalize)
@@ -415,12 +416,6 @@ class ProgressController extends ChangeNotifier {
     return result;
   }
 
-  Map<String, int> _migrateLegacyQuizScore(int legacyScore) {
-    if (legacyScore <= 0 || _quizIds.isEmpty) return const {};
-    final count = (legacyScore ~/ 100).clamp(0, _quizIds.length).toInt();
-    return {for (var index = 0; index < count; index++) _quizIds[index]: 100};
-  }
-
   void _updateLevelInMemory() {
     var level = 'Beginner';
     if (_progress.completedLessons >= _progress.totalLessons &&
@@ -451,15 +446,32 @@ class ProgressController extends ChangeNotifier {
         _syncState = ProgressSyncState.synced;
         _lastSyncedAt = DateTime.now();
       }
-    } catch (_) {
+    } catch (error, stackTrace) {
+      _debugFailure('Progress save', error, stackTrace);
+      if (_activeUserId != userId) return;
       _syncState = userId == null
           ? ProgressSyncState.localOnly
           : ProgressSyncState.error;
       _errorMessage = userId == null
           ? 'Your latest progress is visible, but it could not be saved on this device.'
-          : 'Your progress is saved on this device. It will update online when the connection is available.';
+          : _isConnectionFailure(error)
+          ? 'Your progress is saved on this device. It will update online when the connection is available.'
+          : 'Your progress is saved on this device, but the account synchronization was rejected.';
     }
-    notifyListeners();
+    if (_activeUserId == userId) notifyListeners();
+  }
+
+  void _debugFailure(String label, Object error, StackTrace stackTrace) {
+    if (kDebugMode) debugPrint('$label failed: $error\n$stackTrace');
+  }
+
+  bool _isConnectionFailure(Object error) {
+    final value = error.toString().toLowerCase();
+    return value.contains('socket') ||
+        value.contains('network') ||
+        value.contains('connection') ||
+        value.contains('failed to fetch') ||
+        value.contains('timeout');
   }
 
   Future<void> _persistLocal({

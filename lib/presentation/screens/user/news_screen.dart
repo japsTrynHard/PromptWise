@@ -21,17 +21,22 @@ class NewsScreen extends StatelessWidget {
     final controller = context.watch<AwarenessFeedController>();
     final items = _applyLegacyFilter(controller.articles, filter);
     final featured = items.isEmpty ? null : items.first;
-    final remaining = items.length <= 1 ? const <AwarenessArticle>[] : items.skip(1).toList(growable: false);
+    final remaining = items.length <= 1
+        ? const <AwarenessArticle>[]
+        : items.skip(1).toList(growable: false);
 
     return Scaffold(
       appBar: PromptWiseAppBar(
         eyebrow: 'DISCOVER · AI AWARENESS',
         title: 'AI Awareness',
-        subtitle: 'Current AI, deepfake, synthetic-media, and AI misinformation updates.',
+        subtitle:
+            'Current AI, deepfake, synthetic-media, and AI misinformation updates.',
         backTooltip: 'Back to Home',
         actions: [
           PromptWiseHeaderIconButton(
-            tooltip: controller.isRefreshing ? 'Checking for updates' : 'Check for updates',
+            tooltip: controller.isRefreshing
+                ? 'Checking for updates'
+                : 'Check for updates',
             icon: Icons.refresh_rounded,
             loading: controller.isRefreshing,
             onPressed: controller.isLoading || controller.isRefreshing
@@ -42,7 +47,8 @@ class NewsScreen extends StatelessWidget {
       ),
       body: AdaptiveBody(
         child: RefreshIndicator(
-          onRefresh: () => _checkForUpdates(context, controller, showMessage: false),
+          onRefresh: () =>
+              _checkForUpdates(context, controller, showMessage: false),
           child: CustomScrollView(
             physics: const AlwaysScrollableScrollPhysics(),
             slivers: [
@@ -55,6 +61,19 @@ class NewsScreen extends StatelessWidget {
                     _ScopePicker(controller: controller),
                     const SizedBox(height: AppSpacing.md),
                     _CategoryPicker(controller: controller),
+                    if (controller.backgroundUpdateMessage != null) ...[
+                      const SizedBox(height: AppSpacing.md),
+                      MaterialBanner(
+                        content: Text(controller.backgroundUpdateMessage!),
+                        leading: const Icon(Icons.new_releases_outlined),
+                        actions: [
+                          TextButton(
+                            onPressed: controller.clearBackgroundUpdateMessage,
+                            child: const Text('Dismiss'),
+                          ),
+                        ],
+                      ),
+                    ],
                     if (controller.errorMessage != null) ...[
                       const SizedBox(height: AppSpacing.md),
                       StateMessage.error(
@@ -98,13 +117,15 @@ class NewsScreen extends StatelessWidget {
                       children: [
                         const _SectionTitle(
                           title: 'Worth knowing now',
-                          subtitle: 'A current update selected for relevance, freshness, and source quality.',
+                          subtitle:
+                              'A current update selected for relevance, freshness, and source quality.',
                         ),
                         const SizedBox(height: AppSpacing.md),
                         if (featured != null)
                           _FeaturedArticleCard(
                             article: featured,
-                            onOpen: () => _openArticle(context, controller, featured),
+                            onOpen: () =>
+                                _openArticle(context, controller, featured),
                             onSave: () => controller.toggleSaved(featured),
                           ),
                         const SizedBox(height: AppSpacing.section),
@@ -122,24 +143,22 @@ class NewsScreen extends StatelessWidget {
                 SliverPadding(
                   padding: AdaptiveLayout.pageInsets(context, top: 0),
                   sliver: SliverList(
-                    delegate: SliverChildBuilderDelegate(
-                      (context, index) {
-                        final article = remaining[index];
-                        return Padding(
-                          padding: EdgeInsets.only(
-                            bottom: index == remaining.length - 1
-                                ? AppSpacing.section
-                                : AppSpacing.md,
-                          ),
-                          child: _ArticleCard(
-                            article: article,
-                            onOpen: () => _openArticle(context, controller, article),
-                            onSave: () => controller.toggleSaved(article),
-                          ),
-                        );
-                      },
-                      childCount: remaining.length,
-                    ),
+                    delegate: SliverChildBuilderDelegate((context, index) {
+                      final article = remaining[index];
+                      return Padding(
+                        padding: EdgeInsets.only(
+                          bottom: index == remaining.length - 1
+                              ? AppSpacing.section
+                              : AppSpacing.md,
+                        ),
+                        child: _ArticleCard(
+                          article: article,
+                          onOpen: () =>
+                              _openArticle(context, controller, article),
+                          onSave: () => controller.toggleSaved(article),
+                        ),
+                      );
+                    }, childCount: remaining.length),
                   ),
                 ),
               ],
@@ -164,11 +183,7 @@ Future<void> _checkForUpdates(
 
   ScaffoldMessenger.of(context)
     ..hideCurrentSnackBar()
-    ..showSnackBar(
-      SnackBar(
-        content: Text(message),
-      ),
-    );
+    ..showSnackBar(SnackBar(content: Text(message)));
 }
 
 Future<void> _openArticle(
@@ -183,7 +198,9 @@ Future<void> _openArticle(
   }
   ScaffoldMessenger.of(context).showSnackBar(
     const SnackBar(
-      content: Text('The article link was copied. Open it in your browser to read the original source.'),
+      content: Text(
+        'The article link was copied. Open it in your browser to read the original source.',
+      ),
     ),
   );
 }
@@ -192,7 +209,8 @@ List<AwarenessArticle> _applyLegacyFilter(
   List<AwarenessArticle> source,
   AwarenessFilter? filter,
 ) {
-  final keywords = filter?.keywords
+  final keywords =
+      filter?.keywords
           .map((value) => value.trim().toLowerCase())
           .where((value) => value.isNotEmpty)
           .toList(growable: false) ??
@@ -200,12 +218,14 @@ List<AwarenessArticle> _applyLegacyFilter(
   if (keywords.isEmpty) {
     return source;
   }
-  return source.where((article) {
-    final searchable =
-        '${article.title} ${article.summary} ${article.whyItMatters} ${article.category.label}'
-            .toLowerCase();
-    return keywords.any(searchable.contains);
-  }).toList(growable: false);
+  return source
+      .where((article) {
+        final searchable =
+            '${article.title} ${article.summary} ${article.whyItMatters} ${article.category.label}'
+                .toLowerCase();
+        return keywords.any(searchable.contains);
+      })
+      .toList(growable: false);
 }
 
 class _Header extends StatelessWidget {
@@ -410,7 +430,9 @@ class _FeaturedArticleCard extends StatelessWidget {
                       label: const Text('Read original'),
                     ),
                     IconButton.outlined(
-                      tooltip: article.saved ? 'Remove saved article' : 'Save article',
+                      tooltip: article.saved
+                          ? 'Remove saved article'
+                          : 'Save article',
                       onPressed: onSave,
                       icon: Icon(
                         article.saved
@@ -506,7 +528,9 @@ class _ArticleCard extends StatelessWidget {
                     ),
                     const Spacer(),
                     IconButton(
-                      tooltip: article.saved ? 'Remove saved article' : 'Save article',
+                      tooltip: article.saved
+                          ? 'Remove saved article'
+                          : 'Save article',
                       onPressed: onSave,
                       icon: Icon(
                         article.saved
@@ -526,7 +550,10 @@ class _ArticleCard extends StatelessWidget {
               children: [
                 image,
                 const SizedBox(height: AppSpacing.lg),
-                Row(crossAxisAlignment: CrossAxisAlignment.start, children: [copy]),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [copy],
+                ),
               ],
             );
           }
@@ -559,7 +586,9 @@ class _ArticleMeta extends StatelessWidget {
       children: [
         Text(
           article.sourceName,
-          style: theme.textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w700),
+          style: theme.textTheme.labelLarge?.copyWith(
+            fontWeight: FontWeight.w700,
+          ),
         ),
         Text('·', style: theme.textTheme.bodySmall),
         Text(
@@ -615,7 +644,10 @@ class _WhyItMatters extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(Icons.lightbulb_outline_rounded, color: theme.colorScheme.primary),
+          Icon(
+            Icons.lightbulb_outline_rounded,
+            color: theme.colorScheme.primary,
+          ),
           const SizedBox(width: AppSpacing.sm),
           Expanded(
             child: Text(
@@ -701,7 +733,9 @@ class _SectionTitle extends StatelessWidget {
       children: [
         Text(
           title,
-          style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
+          style: theme.textTheme.headlineSmall?.copyWith(
+            fontWeight: FontWeight.w700,
+          ),
         ),
         const SizedBox(height: AppSpacing.xs),
         Text(

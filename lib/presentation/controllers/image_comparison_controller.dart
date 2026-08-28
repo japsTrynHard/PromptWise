@@ -4,15 +4,16 @@ import '../../data/models/image_comparison.dart';
 import '../../data/services/verification_media_service.dart';
 
 class ImageComparisonController extends ChangeNotifier {
-  ImageComparisonController({VerificationMediaService? service})
+  ImageComparisonController({VerificationMediaGateway? service})
     : _service = service;
 
   static const Duration _cacheTtl = Duration(minutes: 12);
 
-  final VerificationMediaService? _service;
+  final VerificationMediaGateway? _service;
 
   String? _activeUserId;
   int _requestEpoch = 0;
+  bool _disposed = false;
 
   bool _isLoading = false;
   String? _errorMessage;
@@ -37,6 +38,7 @@ class ImageComparisonController extends ChangeNotifier {
   }
 
   Future<void> bindAuthenticatedUser(String? userId) async {
+    if (_disposed) return;
     if (_activeUserId == userId) {
       return;
     }
@@ -70,6 +72,38 @@ class ImageComparisonController extends ChangeNotifier {
     return _fetchRounds(count: count, replaceWithFresh: true);
   }
 
+  Future<ImageComparisonAttemptResult?> submitAttempt({
+    required String roundId,
+    required String selectedSide,
+  }) async {
+    final service = _service;
+    final userId = _activeUserId;
+    final epoch = _requestEpoch;
+    if (service == null || userId == null) return null;
+    if (_errorMessage != null) {
+      _errorMessage = null;
+      notifyListeners();
+    }
+    try {
+      final result = await service.submitAttempt(
+        roundId: roundId,
+        selectedSide: selectedSide,
+      );
+      if (!_isCurrent(userId, epoch)) return null;
+      return result;
+    } catch (error, stackTrace) {
+      if (kDebugMode) {
+        debugPrint('Image comparison submission failed: $error\n$stackTrace');
+      }
+      if (_isCurrent(userId, epoch)) {
+        _errorMessage =
+            'Your answer could not be checked or saved. Please try again.';
+        notifyListeners();
+      }
+      return null;
+    }
+  }
+
   Future<bool> _fetchRounds({
     required int count,
     required bool replaceWithFresh,
@@ -98,7 +132,7 @@ class ImageComparisonController extends ChangeNotifier {
     try {
       final result = await service.fetchRounds(count: count, seenIds: _seenIds);
 
-      if (_activeUserId != userId || _requestEpoch != epoch) {
+      if (!_isCurrent(userId, epoch)) {
         return false;
       }
 
@@ -113,14 +147,17 @@ class ImageComparisonController extends ChangeNotifier {
       }
 
       return true;
-    } catch (error) {
-      if (_activeUserId == userId && _requestEpoch == epoch) {
+    } catch (error, stackTrace) {
+      if (kDebugMode) {
+        debugPrint('Image comparison loading failed: $error\n$stackTrace');
+      }
+      if (_isCurrent(userId, epoch)) {
         _errorMessage = error.toString();
       }
 
       return false;
     } finally {
-      if (_activeUserId == userId && _requestEpoch == epoch) {
+      if (_isCurrent(userId, epoch)) {
         _isLoading = false;
         notifyListeners();
       }
@@ -128,11 +165,23 @@ class ImageComparisonController extends ChangeNotifier {
   }
 
   void clearError() {
+    if (_disposed) return;
     if (_errorMessage == null) {
       return;
     }
 
     _errorMessage = null;
     notifyListeners();
+  }
+
+  bool _isCurrent(String userId, int epoch) {
+    return !_disposed && _activeUserId == userId && _requestEpoch == epoch;
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    _requestEpoch += 1;
+    super.dispose();
   }
 }

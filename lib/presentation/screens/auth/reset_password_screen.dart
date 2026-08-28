@@ -32,8 +32,8 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
     );
     if (!mounted || !success) return;
     final messenger = ScaffoldMessenger.of(context);
-    context.read<AuthController>().cancelPasswordRecovery();
     Navigator.pushNamedAndRemoveUntil(context, AppRoutes.root, (_) => false);
+    context.read<AuthController>().completePasswordRecovery();
     messenger.showSnackBar(
       const SnackBar(content: Text('Password updated successfully.')),
     );
@@ -64,6 +64,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
               autofillHints: const [AutofillHints.newPassword],
               decoration: InputDecoration(
                 labelText: 'New password',
+                helperText: 'Use at least 8 characters.',
                 prefixIcon: const Icon(Icons.lock_reset_rounded),
                 suffixIcon: IconButton(
                   tooltip: _obscure ? 'Show password' : 'Hide password',
@@ -103,7 +104,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
                   : const Icon(Icons.check_rounded),
-              label: Text(auth.isLoading ? 'Updating...' : 'Update password'),
+              label: Text(auth.isLoading ? 'Updating...' : 'Save password'),
             ),
           ],
         ),

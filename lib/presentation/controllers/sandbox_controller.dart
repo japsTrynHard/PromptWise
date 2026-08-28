@@ -23,6 +23,8 @@ class SandboxController extends ChangeNotifier {
   final PromptCoachRepository? _repository;
 
   String? _activeUserId;
+  int _requestEpoch = 0;
+  bool _disposed = false;
   String? _activeSessionId;
   PromptCoachMode _mode = PromptCoachMode.standard;
   String _lastPrompt = '';
@@ -79,11 +81,15 @@ class SandboxController extends ChangeNotifier {
   }
 
   Future<void> bindAuthenticatedUser(String? userId) async {
+    if (_disposed) return;
     if (_activeUserId == userId && _coachChecked) return;
     _activeUserId = userId;
+    _requestEpoch++;
     _activeSessionId = null;
     _recentSessions = const [];
     _historyMessage = null;
+    _isHistoryLoading = false;
+    _isLoading = false;
     _coachChecked = false;
     _coachAvailable = false;
     _usage = PromptCoachUsage.initial();
@@ -112,6 +118,8 @@ class SandboxController extends ChangeNotifier {
   Future<void> checkCoachAvailability() async {
     if (_coachChecked && _activeUserId != null) return;
     final service = _service;
+    final userId = _activeUserId;
+    final epoch = _requestEpoch;
     if (service == null) {
       _coachChecked = true;
       _coachAvailable = false;
@@ -123,32 +131,43 @@ class SandboxController extends ChangeNotifier {
 
     try {
       final status = await service.getCoachStatus();
+      if (!_isCurrent(userId, epoch)) return;
       _coachAvailable = status.available;
       _usage = status.usage;
       _serviceMessage = status.available
           ? null
           : 'AI Coach is unavailable. Standard Coach remains fully available.';
-    } on TimeoutException {
+    } on TimeoutException catch (error, stackTrace) {
+      if (!_isCurrent(userId, epoch)) return;
+      _debugFailure('AI Coach status', error, stackTrace);
       _coachAvailable = false;
       _serviceMessage =
           'AI Coach status check timed out. Standard Coach remains available.';
-    } on http.ClientException {
+    } on http.ClientException catch (error, stackTrace) {
+      if (!_isCurrent(userId, epoch)) return;
+      _debugFailure('AI Coach status', error, stackTrace);
       _coachAvailable = false;
       _serviceMessage =
           'You appear to be offline. Standard Coach still works on this device.';
-    } on IntegrationException catch (error) {
+    } on IntegrationException catch (error, stackTrace) {
+      if (!_isCurrent(userId, epoch)) return;
+      _debugFailure('AI Coach status', error, stackTrace);
       _coachAvailable = false;
       _serviceMessage = _friendlyServiceMessage(error.message);
-    } catch (_) {
+    } catch (error, stackTrace) {
+      if (!_isCurrent(userId, epoch)) return;
+      _debugFailure('AI Coach status', error, stackTrace);
       _coachAvailable = false;
       _serviceMessage =
           'AI Coach is unavailable. Standard Coach remains fully available.';
     } finally {
-      _coachChecked = true;
-      if (_mode == PromptCoachMode.ai && !canUseAi) {
-        _mode = PromptCoachMode.standard;
+      if (_isCurrent(userId, epoch)) {
+        _coachChecked = true;
+        if (_mode == PromptCoachMode.ai && !canUseAi) {
+          _mode = PromptCoachMode.standard;
+        }
+        notifyListeners();
       }
-      notifyListeners();
     }
   }
 
@@ -156,18 +175,26 @@ class SandboxController extends ChangeNotifier {
     final userId = _activeUserId;
     final repository = _repository;
     if (userId == null || repository == null || _isHistoryLoading) return;
+    final epoch = _requestEpoch;
 
     _isHistoryLoading = true;
     _historyMessage = null;
     notifyListeners();
     try {
-      _recentSessions = await repository.fetchRecentSessions();
-    } catch (_) {
-      _historyMessage =
-          'Revision history could not be refreshed. Your current coaching session still works.';
+      final loaded = await repository.fetchRecentSessions();
+      if (!_isCurrent(userId, epoch)) return;
+      _recentSessions = loaded;
+    } catch (error, stackTrace) {
+      _debugFailure('Prompt Coach history', error, stackTrace);
+      if (_isCurrent(userId, epoch)) {
+        _historyMessage =
+            'Revision history could not be refreshed. Your current coaching session still works.';
+      }
     } finally {
-      _isHistoryLoading = false;
-      notifyListeners();
+      if (_isCurrent(userId, epoch)) {
+        _isHistoryLoading = false;
+        notifyListeners();
+      }
     }
   }
 
@@ -177,12 +204,13 @@ class SandboxController extends ChangeNotifier {
     final userId = _activeUserId;
     final repository = _repository;
     if (userId == null || repository == null) return const [];
-    return repository.fetchSessionRevisions(
+    final epoch = _requestEpoch;
+    final revisions = await repository.fetchSessionRevisions(
       userId: userId,
       sessionId: sessionId,
     );
+    return _isCurrent(userId, epoch) ? revisions : const [];
   }
-
 
   void setMode(PromptCoachMode value) {
     if (value == PromptCoachMode.ai && !canUseAi) {
@@ -202,8 +230,10 @@ class SandboxController extends ChangeNotifier {
 
   void inspectPrompt(String prompt) {
     final findings = PromptCoachRubricEngine.inspectPrivacy(prompt.trim());
-    if (listEquals(findings.map((e) => e.code).toList(),
-        _livePrivacyFindings.map((e) => e.code).toList())) {
+    if (listEquals(
+      findings.map((e) => e.code).toList(),
+      _livePrivacyFindings.map((e) => e.code).toList(),
+    )) {
       return;
     }
     _livePrivacyFindings = findings;
@@ -220,6 +250,9 @@ class SandboxController extends ChangeNotifier {
     required String learnerRank,
     LearningTopic? focusTopic,
   }) async {
+    if (_disposed) return false;
+    final operationUserId = _activeUserId;
+    final operationEpoch = _requestEpoch;
     final cleanedPrompt = prompt.trim();
     final validationError = validatePrompt(cleanedPrompt);
 
@@ -265,19 +298,26 @@ class SandboxController extends ChangeNotifier {
               masteryContext: masteryContext,
               learnerRank: learnerRank,
             );
+            if (!_isCurrent(operationUserId, operationEpoch)) return false;
             aiGuidance = result.guidance;
             _usage = result.usage;
             _coachAvailable = true;
             _coachChecked = true;
-          } on TimeoutException {
+          } on TimeoutException catch (error, stackTrace) {
+            if (!_isCurrent(operationUserId, operationEpoch)) return false;
+            _debugFailure('AI Coach review', error, stackTrace);
             effectiveMode = PromptCoachMode.standard;
             _serviceMessage =
                 'AI Coach took too long to respond. Standard feedback is shown instead.';
-          } on http.ClientException {
+          } on http.ClientException catch (error, stackTrace) {
+            if (!_isCurrent(operationUserId, operationEpoch)) return false;
+            _debugFailure('AI Coach review', error, stackTrace);
             effectiveMode = PromptCoachMode.standard;
             _serviceMessage =
                 'You appear to be offline. Standard feedback is shown instead.';
-          } on IntegrationException catch (error) {
+          } on IntegrationException catch (error, stackTrace) {
+            if (!_isCurrent(operationUserId, operationEpoch)) return false;
+            _debugFailure('AI Coach review', error, stackTrace);
             effectiveMode = PromptCoachMode.standard;
             _serviceMessage = _friendlyServiceMessage(error.message);
             if (error.message.toLowerCase().contains('daily')) {
@@ -287,7 +327,9 @@ class SandboxController extends ChangeNotifier {
                 resetAt: _usage.resetAt,
               );
             }
-          } catch (_) {
+          } catch (error, stackTrace) {
+            if (!_isCurrent(operationUserId, operationEpoch)) return false;
+            _debugFailure('AI Coach review', error, stackTrace);
             effectiveMode = PromptCoachMode.standard;
             _serviceMessage =
                 'AI Coach is unavailable. Standard feedback is shown instead.';
@@ -314,11 +356,14 @@ class SandboxController extends ChangeNotifier {
           aiGuidance: aiGuidance,
           focusTopic: focusTopic,
         );
+        if (!_isCurrent(operationUserId, operationEpoch)) return false;
         _activeSessionId = saved.sessionId;
         _revisionNumber = saved.revisionNumber;
         _masteryEvidenceCount = saved.masteryEvidenceCount;
         await refreshHistory();
-      } catch (_) {
+      } catch (error, stackTrace) {
+        if (!_isCurrent(operationUserId, operationEpoch)) return false;
+        _debugFailure('Prompt Coach revision save', error, stackTrace);
         _historyMessage =
             'Feedback is ready, but this revision could not be synced to your history.';
       }
@@ -326,9 +371,17 @@ class SandboxController extends ChangeNotifier {
       _revisionNumber += 1;
     }
 
+    if (!_isCurrent(operationUserId, operationEpoch)) return false;
     _isLoading = false;
     notifyListeners();
     return true;
+  }
+
+  bool _isCurrent(String? userId, int epoch) =>
+      !_disposed && _activeUserId == userId && _requestEpoch == epoch;
+
+  void _debugFailure(String label, Object error, StackTrace stackTrace) {
+    if (kDebugMode) debugPrint('$label failed: $error\n$stackTrace');
   }
 
   String? validatePrompt(String prompt) {
@@ -351,8 +404,16 @@ class SandboxController extends ChangeNotifier {
   }
 
   void startNewSession() {
+    if (_disposed) return;
     _activeSessionId = null;
     _resetSessionState(notify: true);
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    _requestEpoch++;
+    super.dispose();
   }
 
   void _resetSessionState({required bool notify}) {

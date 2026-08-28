@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:promptwise/data/models/image_comparison.dart';
 import 'package:promptwise/data/models/learning_progression.dart';
@@ -7,22 +9,25 @@ void main() {
   group('Phase 9 verification model', () {
     test('all six verification skills keep stable database IDs', () {
       expect(VerificationSubskill.values, hasLength(6));
-      expect(
-        VerificationSubskill.values.map((item) => item.id).toSet(),
-        {
-          'source_verification',
-          'claim_verification',
-          'media_provenance',
-          'manipulation_detection',
-          'citation_verification',
-          'uncertainty_judgment',
-        },
-      );
+      expect(VerificationSubskill.values.map((item) => item.id).toSet(), {
+        'source_verification',
+        'claim_verification',
+        'media_provenance',
+        'manipulation_detection',
+        'citation_verification',
+        'uncertainty_judgment',
+      });
     });
 
     test('learner labels stay plain and user-friendly', () {
-      expect(VerificationSubskill.sourceVerification.learnerLabel, 'Check the source');
-      expect(VerificationSubskill.mediaProvenance.learnerLabel, 'Where did it come from?');
+      expect(
+        VerificationSubskill.sourceVerification.learnerLabel,
+        'Check the source',
+      );
+      expect(
+        VerificationSubskill.mediaProvenance.learnerLabel,
+        'Where did it come from?',
+      );
       expect(VerificationDecision.aiGenerated.label, 'AI-made');
       expect(
         VerificationDecision.insufficientEvidence.label,
@@ -114,38 +119,93 @@ void main() {
   });
 
   group('Phase 9 online image comparison model', () {
-    test('valid source-labeled image round parses correctly', () {
-      final round = ImageComparisonRound.fromMap({
+    test('unanswered challenge contains no answer or source feedback', () {
+      final challenge = <String, dynamic>{
         'id': 'round-1',
         'topic': 'city',
         'question': 'Which image is listed as AI-made by its source?',
         'hint': 'Make your best guess first.',
-        'correct_side': 'B',
-        'explanation': 'The source labels image B as AI-made.',
         'image_a': {
-          'id': 'real-1',
-          'title': 'City photo',
-          'image_url': 'https://upload.wikimedia.org/example-real.jpg',
-          'source_page_url': 'https://commons.wikimedia.org/wiki/File:real.jpg',
-          'creator': 'Example creator',
-          'license': 'CC BY-SA',
-          'labeled_ai_generated': false,
+          'id': 'round-1:A',
+          'image_url':
+              'https://project.supabase.co/functions/v1/verification-media?round_id=round-1&side=A',
         },
         'image_b': {
-          'id': 'ai-1',
-          'title': 'AI city',
-          'image_url': 'https://upload.wikimedia.org/example-ai.jpg',
-          'source_page_url': 'https://commons.wikimedia.org/wiki/File:ai.jpg',
+          'id': 'round-1:B',
+          'image_url':
+              'https://project.supabase.co/functions/v1/verification-media?round_id=round-1&side=B',
+        },
+      };
+
+      final round = ImageComparisonRound.fromMap(challenge);
+
+      expect(round.id, 'round-1');
+      expect(challenge, isNot(contains('correct_side')));
+      expect(challenge, isNot(contains('explanation')));
+      for (final imageKey in ['image_a', 'image_b']) {
+        expect(
+          (challenge[imageKey] as Map).keys,
+          unorderedEquals(['id', 'image_url']),
+        );
+        expect(
+          (challenge[imageKey] as Map)['image_url'],
+          isNot(contains('upload.wikimedia.org')),
+        );
+      }
+    });
+
+    test('answer and source feedback parse only after submission', () {
+      final feedback = ImageComparisonAttemptResult.fromMap({
+        'round_id': 'round-1',
+        'selected_side': 'A',
+        'correct_side': 'B',
+        'is_correct': false,
+        'explanation': 'The original source identifies image B as AI-made.',
+        'correct_source': {
+          'title': 'Source-labeled image',
+          'source_page_url':
+              'https://commons.wikimedia.org/wiki/File:example.jpg',
           'creator': 'Example creator',
           'license': 'CC BY-SA',
-          'labeled_ai_generated': true,
         },
+        'counted_for_mastery': true,
+        'subskill_mastery_after': 75,
+        'duplicate': false,
       });
 
-      expect(round.correctSide, 'B');
-      expect(round.isCorrect('B'), isTrue);
-      expect(round.isCorrect('A'), isFalse);
-      expect(round.correctImage.labeledAiGenerated, isTrue);
+      expect(feedback.isCorrect, isFalse);
+      expect(feedback.selectedSide, 'A');
+      expect(feedback.correctSide, 'B');
+      expect(feedback.correctSource.creator, 'Example creator');
+    });
+
+    test('Edge Function never returns its internal round objects directly', () {
+      final source = File(
+        'supabase/functions/verification-media/index.ts',
+      ).readAsStringSync();
+      final start = source.indexOf('function toChallengePayload(');
+      final end = source.indexOf('function toFeedbackPayload(', start);
+
+      expect(start, greaterThanOrEqualTo(0));
+      expect(end, greaterThan(start));
+      expect(source, contains('rounds: challengeRounds'));
+      expect(
+        RegExp(r'return json\(\{\s*rounds,', multiLine: true).hasMatch(source),
+        isFalse,
+      );
+
+      final challengeBuilder = source.substring(start, end);
+      for (final forbidden in [
+        'correct_side',
+        'explanation',
+        'labeled_ai_generated',
+        'source_page_url',
+        'creator',
+        'license',
+        'upload.wikimedia.org',
+      ]) {
+        expect(challengeBuilder, isNot(contains(forbidden)));
+      }
     });
   });
 }

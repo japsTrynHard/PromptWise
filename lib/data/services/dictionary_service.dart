@@ -1,69 +1,122 @@
 import 'dart:async';
-import 'dart:convert';
 
-import 'package:http/http.dart' as http;
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/dictionary_entry.dart';
 
-class DictionaryService {
-  DictionaryService({http.Client? httpClient})
-    : _http = httpClient ?? http.Client();
+abstract interface class DictionaryLookupService {
+  Future<DictionaryEntry> lookup(String word);
+}
 
-  final http.Client _http;
+class DictionaryService implements DictionaryLookupService {
+  DictionaryService({SupabaseClient? client})
+    : _client = client ?? Supabase.instance.client;
 
+  final SupabaseClient _client;
+
+  @override
   Future<DictionaryEntry> lookup(String word) async {
     final cleaned = word.trim().toLowerCase();
-    final uri = Uri.parse(
-      'https://api.dictionaryapi.dev/api/v2/entries/en/${Uri.encodeComponent(cleaned)}',
-    );
-
-    final response = await _http
-        .get(uri, headers: const {'Accept': 'application/json'})
-        .timeout(const Duration(seconds: 12));
-
-    if (response.statusCode == 404) {
-      throw const DictionaryNotFoundException();
-    }
-    if (response.statusCode < 200 || response.statusCode >= 300) {
+    if (cleaned.isEmpty || cleaned.length > 50) {
       throw const DictionaryServiceException(
-        'The dictionary is temporarily unavailable. Please try again.',
+        'Enter one short word from the lesson.',
+        kind: DictionaryFailureKind.invalidRequest,
       );
     }
 
-    dynamic decoded;
+    late final FunctionResponse response;
     try {
-      decoded = jsonDecode(response.body);
-    } on FormatException {
+      response = await _client.functions
+          .invoke('dictionary-lookup', body: {'word': cleaned})
+          .timeout(const Duration(seconds: 15));
+    } on TimeoutException {
+      throw const DictionaryServiceException(
+        'The connection is taking too long. Please try again.',
+        kind: DictionaryFailureKind.timeout,
+      );
+    } on FunctionException catch (error) {
+      _throwFunctionFailure(error.status, error.details);
+    }
+    final data = response.data;
+    final body = data is Map
+        ? Map<String, dynamic>.from(data)
+        : const <String, dynamic>{};
+
+    final rawEntry = body['entry'];
+    if (rawEntry is! Map) {
       throw const DictionaryServiceException(
         'The dictionary returned an unreadable response. Please try again.',
+        kind: DictionaryFailureKind.invalidResponse,
       );
     }
-
-    if (decoded is! List || decoded.isEmpty || decoded.first is! Map) {
+    final entry = DictionaryEntry.fromMap(Map<String, dynamic>.from(rawEntry));
+    if (entry.word.isEmpty || entry.definitions.isEmpty) {
       throw const DictionaryServiceException(
         'No readable definition was returned for this word.',
-      );
-    }
-
-    final entry = DictionaryEntry.fromApiMap(
-      Map<String, dynamic>.from(decoded.first as Map),
-    );
-    if (entry.definitions.isEmpty) {
-      throw const DictionaryServiceException(
-        'No readable definition was returned for this word.',
+        kind: DictionaryFailureKind.invalidResponse,
       );
     }
     return entry;
   }
 
-  void dispose() {
-    _http.close();
+  Never _throwFunctionFailure(int status, dynamic details) {
+    final body = details is Map
+        ? Map<String, dynamic>.from(details)
+        : const <String, dynamic>{};
+    final code = body['code']?.toString().trim().toLowerCase();
+    final message = body['message']?.toString().trim();
+    if (status == 404 || code == 'not_found') {
+      throw const DictionaryNotFoundException();
+    }
+    if (status == 401 || status == 403) {
+      throw const DictionaryServiceException(
+        'Please sign in again to use the lesson dictionary.',
+        kind: DictionaryFailureKind.authentication,
+      );
+    }
+    if (status == 429 || code == 'rate_limited') {
+      throw const DictionaryServiceException(
+        'The dictionary is busy right now. Wait a moment, then try again.',
+        kind: DictionaryFailureKind.rateLimited,
+      );
+    }
+    if (status == 504 || code == 'timeout') {
+      throw const DictionaryServiceException(
+        'The dictionary lookup took too long. Please try again.',
+        kind: DictionaryFailureKind.timeout,
+      );
+    }
+    throw DictionaryServiceException(
+      message?.isNotEmpty == true
+          ? message!
+          : 'The dictionary is temporarily unavailable. Please try again.',
+      kind: code == 'invalid_response'
+          ? DictionaryFailureKind.invalidResponse
+          : DictionaryFailureKind.upstream,
+    );
   }
+}
+
+enum DictionaryFailureKind {
+  invalidRequest,
+  authentication,
+  notFound,
+  rateLimited,
+  timeout,
+  network,
+  upstream,
+  invalidResponse,
+  unknown,
 }
 
 class DictionaryServiceException implements Exception {
   final String message;
-  const DictionaryServiceException(this.message);
+  final DictionaryFailureKind kind;
+
+  const DictionaryServiceException(
+    this.message, {
+    this.kind = DictionaryFailureKind.unknown,
+  });
 
   @override
   String toString() => message;
@@ -71,5 +124,8 @@ class DictionaryServiceException implements Exception {
 
 class DictionaryNotFoundException extends DictionaryServiceException {
   const DictionaryNotFoundException()
-    : super('No definition was found. Try another word from the lesson.');
+    : super(
+        'No definition was found. Try another word from the lesson.',
+        kind: DictionaryFailureKind.notFound,
+      );
 }

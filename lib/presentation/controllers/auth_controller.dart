@@ -10,10 +10,10 @@ import '../../data/repositories/auth_repository.dart';
 import '../../data/services/storage_service.dart';
 
 class AuthController extends ChangeNotifier {
-  final AuthRepository? _repository;
+  final AuthGateway? _repository;
   final StorageService _storage;
 
-  AuthController({AuthRepository? repository, StorageService? storage})
+  AuthController({AuthGateway? repository, StorageService? storage})
     : _repository = repository,
       _storage = storage ?? StorageService();
 
@@ -26,6 +26,7 @@ class AuthController extends ChangeNotifier {
   bool _isLoading = false;
   bool _isProfileLoading = false;
   bool _isPasswordRecovery = false;
+  bool _profileRoleAuthoritative = false;
   String? _pendingEmail;
   AuthOtpPurpose? _pendingOtpPurpose;
   String? _errorMessage;
@@ -38,8 +39,11 @@ class AuthController extends ChangeNotifier {
   bool get isProfileLoading => _isProfileLoading;
   bool get isAuthenticated => _session?.user != null;
   bool get isEmailVerified => _session?.user.emailConfirmedAt != null;
-  bool get isAdministrator => _profile?.role == AppRole.administrator;
-  bool get isLearner => _profile?.role == AppRole.learner;
+  bool get isAdministrator =>
+      _profileRoleAuthoritative &&
+      _profile?.role == AppRole.administrator &&
+      _profile?.id == userId;
+  bool get isLearner => isAuthenticated && !isAdministrator;
   bool get isPasswordRecovery => _isPasswordRecovery;
   bool get isReadyForRouting =>
       isInitialized &&
@@ -82,7 +86,7 @@ class AuthController extends ChangeNotifier {
     // Subscribe before profile hydration so auth changes are never missed while
     // a returning device is restoring its local account state.
     _authSubscription = repository.authStateChanges.listen(
-      _handleAuthState,
+      handleAuthState,
       onError: (Object error, StackTrace stackTrace) {
         _errorMessage = _friendlyMessage(error);
         notifyListeners();
@@ -100,18 +104,20 @@ class AuthController extends ChangeNotifier {
     notifyListeners();
   }
 
-  void _handleAuthState(AuthState state) {
+  @visibleForTesting
+  void handleAuthState(AuthState state) {
     final previousUserId = _session?.user.id;
     final nextUserId = state.session?.user.id;
     _session = state.session;
 
     if (state.event == AuthChangeEvent.passwordRecovery) {
       _isPasswordRecovery = true;
-      _pendingOtpPurpose = AuthOtpPurpose.recovery;
+      _pendingOtpPurpose = null;
     }
 
     if (state.event == AuthChangeEvent.signedOut || state.session == null) {
       _profile = null;
+      _profileRoleAuthoritative = false;
       _isProfileLoading = false;
       _profileLoadFuture = null;
       _profileLoadUserId = null;
@@ -127,6 +133,7 @@ class AuthController extends ChangeNotifier {
 
     if (previousUserId != nextUserId) {
       _profile = null;
+      _profileRoleAuthoritative = false;
     }
 
     _pendingEmail = state.session?.user.email ?? _pendingEmail;
@@ -231,12 +238,8 @@ class AuthController extends ChangeNotifier {
         throw AuthException('The code could not create an active session.');
       }
 
-      if (purpose == AuthOtpPurpose.recovery) {
-        _isPasswordRecovery = true;
-      } else {
-        _pendingOtpPurpose = null;
-        await _loadProfileOnce(response.user!.id);
-      }
+      _pendingOtpPurpose = null;
+      await _loadProfileOnce(response.user!.id);
     });
   }
 
@@ -264,9 +267,6 @@ class AuthController extends ChangeNotifier {
         case AuthOtpPurpose.signIn:
           await repository.sendSignInOtp(targetEmail);
           break;
-        case AuthOtpPurpose.recovery:
-          await repository.sendPasswordReset(targetEmail);
-          break;
       }
     });
   }
@@ -282,7 +282,7 @@ class AuthController extends ChangeNotifier {
 
     final targetEmail = email.trim();
     _pendingEmail = targetEmail;
-    _pendingOtpPurpose = AuthOtpPurpose.recovery;
+    _pendingOtpPurpose = null;
     return _run(() async {
       await repository.sendPasswordReset(targetEmail);
     });
@@ -294,8 +294,6 @@ class AuthController extends ChangeNotifier {
 
     return _run(() async {
       await repository.updatePassword(password);
-      _isPasswordRecovery = false;
-      _pendingOtpPurpose = null;
     });
   }
 
@@ -305,6 +303,7 @@ class AuthController extends ChangeNotifier {
 
     return _run(() async {
       _profile = await repository.updateMyFullName(fullName);
+      _profileRoleAuthoritative = true;
       final profile = _profile;
       if (profile != null) await _saveProfileCache(profile);
     });
@@ -331,6 +330,7 @@ class AuthController extends ChangeNotifier {
     final id = userId;
     if (id == null) return;
     _profile = null;
+    _profileRoleAuthoritative = false;
     await _loadProfileOnce(id);
   }
 
@@ -342,6 +342,7 @@ class AuthController extends ChangeNotifier {
       await repository.signOut();
       _session = null;
       _profile = null;
+      _profileRoleAuthoritative = false;
       _isProfileLoading = false;
       _profileLoadFuture = null;
       _profileLoadUserId = null;
@@ -358,10 +359,11 @@ class AuthController extends ChangeNotifier {
     notifyListeners();
   }
 
-  void cancelPasswordRecovery() {
+  void completePasswordRecovery() {
     if (!_isPasswordRecovery) return;
     _isPasswordRecovery = false;
     _pendingOtpPurpose = null;
+    _errorMessage = null;
     notifyListeners();
   }
 
@@ -399,7 +401,17 @@ class AuthController extends ChangeNotifier {
     if (_session?.user.id != userId) return;
 
     if (cached != null) {
-      _profile = cached;
+      // Cached identity fields improve startup, but a cached role must never
+      // grant administrator access after the server role has been revoked.
+      _profile = AppProfile(
+        id: cached.id,
+        email: cached.email,
+        fullName: cached.fullName,
+        role: AppRole.learner,
+        createdAt: cached.createdAt,
+        updatedAt: cached.updatedAt,
+      );
+      _profileRoleAuthoritative = false;
       _isProfileLoading = false;
       notifyListeners();
 
@@ -427,19 +439,23 @@ class AuthController extends ChangeNotifier {
       final loaded = await repository.fetchMyProfile(userId);
       if (_session?.user.id != userId) return;
       _profile = loaded ?? _fallbackProfile(userId);
+      _profileRoleAuthoritative = loaded != null;
       await _saveProfileCache(_profile!);
       notifyListeners();
-    } catch (_) {
+    } catch (error, stackTrace) {
+      _debugFailure('Profile refresh', error, stackTrace);
       if (_session?.user.id != userId) return;
 
       final cached = _profile?.id == userId
           ? _profile
           : await _readProfileCache(userId);
       _profile = cached ?? _fallbackProfile(userId);
+      _profileRoleAuthoritative = false;
 
       if (showOfflineMessage) {
-        _errorMessage =
-            'You appear to be offline. Using saved account information until the connection returns.';
+        _errorMessage = _isConnectionFailure(error)
+            ? 'You appear to be offline. Using saved account information until the connection returns.'
+            : 'Account information could not be refreshed. Saved learner access is being used; administrator access requires a successful server check.';
       }
       notifyListeners();
     }
@@ -461,7 +477,8 @@ class AuthController extends ChangeNotifier {
           'updated_at': profile.updatedAt?.toIso8601String(),
         }),
       );
-    } catch (_) {
+    } catch (error, stackTrace) {
+      _debugFailure('Profile cache write', error, stackTrace);
       // Account caching is optional and must not block sign-in.
     }
   }
@@ -475,7 +492,8 @@ class AuthController extends ChangeNotifier {
       if (decoded is! Map) return null;
       final profile = AppProfile.fromMap(Map<String, dynamic>.from(decoded));
       return profile.id == userId ? profile : null;
-    } catch (_) {
+    } catch (error, stackTrace) {
+      _debugFailure('Profile cache read', error, stackTrace);
       return null;
     }
   }
@@ -498,7 +516,8 @@ class AuthController extends ChangeNotifier {
     try {
       await operation();
       return true;
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _debugFailure('Authentication request', error, stackTrace);
       _errorMessage = _friendlyMessage(error);
       return false;
     } finally {
@@ -511,6 +530,19 @@ class AuthController extends ChangeNotifier {
     _errorMessage = 'Sign in is not available in this build.';
     notifyListeners();
     return false;
+  }
+
+  bool _isConnectionFailure(Object error) {
+    final value = error.toString().toLowerCase();
+    return value.contains('socket') ||
+        value.contains('network') ||
+        value.contains('connection') ||
+        value.contains('failed to fetch') ||
+        value.contains('timeout');
+  }
+
+  void _debugFailure(String label, Object error, StackTrace stackTrace) {
+    if (kDebugMode) debugPrint('$label failed: $error\n$stackTrace');
   }
 
   String _friendlyMessage(Object error) {
@@ -530,12 +562,12 @@ class AuthController extends ChangeNotifier {
         return 'Email delivery is not available for this address right now. Please try again later.';
       }
       if (lower.contains('rate limit') || lower.contains('too many requests')) {
-        return 'Too many email requests were sent. Please wait a while before requesting another code.';
+        return 'Too many email requests were sent. Please wait a while before trying again.';
       }
       if (lower.contains('token has expired') ||
           lower.contains('otp_expired') ||
           lower.contains('invalid token')) {
-        return 'The code is invalid or expired. Request a new 6-digit code and use only the latest email.';
+        return 'The email link or code is invalid or expired. Request a new one and use only the latest email.';
       }
       if (lower.contains('user not found') ||
           lower.contains('signups not allowed')) {

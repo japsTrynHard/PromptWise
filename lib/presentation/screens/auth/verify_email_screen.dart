@@ -75,10 +75,9 @@ class _VerifyEmailScreenState extends State<VerifyEmailScreen> {
     );
     if (!mounted || !success) return;
 
-    final route = request.purpose == AuthOtpPurpose.recovery
-        ? AppRoutes.resetPassword
-        : AppRoutes.root;
-    Navigator.pushNamedAndRemoveUntil(context, route, (_) => false);
+    // Signup verification and passwordless sign-in legitimately use codes.
+    // Password recovery is handled only by Supabase's recovery link event.
+    Navigator.pushNamedAndRemoveUntil(context, AppRoutes.root, (_) => false);
   }
 
   Future<void> _resend() async {

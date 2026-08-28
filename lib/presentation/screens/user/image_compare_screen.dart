@@ -4,10 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../../data/models/image_comparison.dart';
-import '../../../data/models/learning_topic.dart';
 import '../../controllers/adaptive_learning_controller.dart';
 import '../../controllers/image_comparison_controller.dart';
+import '../../controllers/learning_progression_controller.dart';
 import '../../controllers/progress_controller.dart';
+import '../../controllers/verification_controller.dart';
 import '../../widgets/adaptive_layout.dart';
 import '../../widgets/promptwise_app_bar.dart';
 import '../../widgets/app_card.dart';
@@ -27,7 +28,9 @@ class _ImageCompareScreenState extends State<ImageCompareScreen> {
   String? _choice;
 
   bool _answered = false;
+  bool _isSubmittingAnswer = false;
   bool _masteryCounted = false;
+  ImageComparisonAttemptResult? _answerResult;
 
   int _score = 0;
 
@@ -88,7 +91,9 @@ class _ImageCompareScreenState extends State<ImageCompareScreen> {
       _choice = null;
 
       _answered = false;
+      _isSubmittingAnswer = false;
       _masteryCounted = false;
+      _answerResult = null;
 
       _score = 0;
 
@@ -113,42 +118,46 @@ class _ImageCompareScreenState extends State<ImageCompareScreen> {
   }
 
   Future<void> _choose(ImageComparisonRound round, String side) async {
-    if (_answered) {
+    if (_answered || _isSubmittingAnswer) {
       return;
     }
 
-    final correct = round.isCorrect(side);
-
     setState(() {
       _choice = side;
-      _answered = true;
-
-      if (correct) {
-        _score += 1;
-      }
+      _isSubmittingAnswer = true;
     });
 
-    final counted = await context
-        .read<AdaptiveLearningController>()
-        .recordPracticeAttempt(
-          itemId: 'image_compare:${round.id}',
-          topic: LearningTopic.verification,
-          isCorrect: correct,
-          attemptType: 'verification_activity',
-        );
+    final result = await context
+        .read<ImageComparisonController>()
+        .submitAttempt(roundId: round.id, selectedSide: side);
 
     if (!mounted) {
       return;
     }
 
-    setState(() => _masteryCounted = counted);
+    if (result == null) {
+      setState(() {
+        _choice = null;
+        _isSubmittingAnswer = false;
+      });
+      return;
+    }
 
-    if (correct) {
+    setState(() {
+      _choice = result.selectedSide;
+      _answered = true;
+      _isSubmittingAnswer = false;
+      _answerResult = result;
+      _masteryCounted = result.countedForMastery;
+      if (result.isCorrect) _score += 1;
+    });
+
+    if (result.isCorrect) {
       await context.read<ProgressController>().addGameBadge();
     }
   }
 
-  void _next(List<ImageComparisonRound> rounds) {
+  Future<void> _next(List<ImageComparisonRound> rounds) async {
     if (_index < rounds.length - 1) {
       final nextIndex = _index + 1;
 
@@ -158,7 +167,9 @@ class _ImageCompareScreenState extends State<ImageCompareScreen> {
         _choice = null;
 
         _answered = false;
+        _isSubmittingAnswer = false;
         _masteryCounted = false;
+        _answerResult = null;
       });
 
       _warmImages(rounds, nextIndex);
@@ -167,6 +178,11 @@ class _ImageCompareScreenState extends State<ImageCompareScreen> {
     }
 
     setState(() => _completed = true);
+    await Future.wait<void>([
+      context.read<AdaptiveLearningController>().refreshFromCloud(),
+      context.read<VerificationController>().refresh(),
+      context.read<LearningProgressionController>().refresh(),
+    ]);
   }
 
   @override
@@ -176,7 +192,6 @@ class _ImageCompareScreenState extends State<ImageCompareScreen> {
     final rounds = controller.rounds;
 
     final theme = Theme.of(context);
-
 
     return Scaffold(
       appBar: PromptWiseAppBar(
@@ -193,7 +208,9 @@ class _ImageCompareScreenState extends State<ImageCompareScreen> {
                 vertical: 7,
               ),
               decoration: BoxDecoration(
-                color: theme.colorScheme.primaryContainer.withValues(alpha: 0.72),
+                color: theme.colorScheme.primaryContainer.withValues(
+                  alpha: 0.72,
+                ),
                 borderRadius: BorderRadius.circular(AppRadius.pill),
               ),
               child: Text(
@@ -250,6 +267,8 @@ class _ImageCompareScreenState extends State<ImageCompareScreen> {
               total: rounds.length,
 
               onAnotherSet: _loadFresh,
+              preparingAnotherSet: controller.isLoading,
+              refreshError: controller.errorMessage,
             )
           : _RoundView(
               round: rounds[_index.clamp(0, rounds.length - 1)],
@@ -262,11 +281,17 @@ class _ImageCompareScreenState extends State<ImageCompareScreen> {
 
               answered: _answered,
 
+              isSubmittingAnswer: _isSubmittingAnswer,
+
+              answerResult: _answerResult,
+
               masteryCounted: _masteryCounted,
+
+              submissionError: controller.errorMessage,
 
               onChoose: (side) => _choose(rounds[_index], side),
 
-              onNext: () => _next(rounds),
+              onNext: () async => _next(rounds),
             ),
     );
   }
@@ -281,7 +306,10 @@ class _RoundView extends StatelessWidget {
   final String? choice;
 
   final bool answered;
+  final bool isSubmittingAnswer;
+  final ImageComparisonAttemptResult? answerResult;
   final bool masteryCounted;
+  final String? submissionError;
 
   final ValueChanged<String> onChoose;
 
@@ -293,7 +321,10 @@ class _RoundView extends StatelessWidget {
     required this.totalRounds,
     required this.choice,
     required this.answered,
+    required this.isSubmittingAnswer,
+    required this.answerResult,
     required this.masteryCounted,
+    required this.submissionError,
     required this.onChoose,
     required this.onNext,
   });
@@ -302,7 +333,8 @@ class _RoundView extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    final correct = choice != null && round.isCorrect(choice!);
+    final correct = answerResult?.isCorrect ?? false;
+    final correctSide = answerResult?.correctSide;
 
     return AdaptiveBody(
       child: SingleChildScrollView(
@@ -382,7 +414,9 @@ class _RoundView extends StatelessWidget {
 
                         answered: answered,
 
-                        correctSide: round.correctSide,
+                        submitting: isSubmittingAnswer,
+
+                        correctSide: correctSide,
 
                         onTap: () => onChoose('A'),
                       ),
@@ -396,7 +430,9 @@ class _RoundView extends StatelessWidget {
 
                         answered: answered,
 
-                        correctSide: round.correctSide,
+                        submitting: isSubmittingAnswer,
+
+                        correctSide: correctSide,
 
                         onTap: () => onChoose('B'),
                       ),
@@ -427,6 +463,34 @@ class _RoundView extends StatelessWidget {
                     );
                   },
                 ),
+
+                if (isSubmittingAnswer) ...[
+                  const SizedBox(height: AppSpacing.xl),
+                  Semantics(
+                    liveRegion: true,
+                    label: 'Checking the selected image with the source',
+                    child: const Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        SizedBox.square(
+                          dimension: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                        SizedBox(width: AppSpacing.sm),
+                        Text('Checking the source...'),
+                      ],
+                    ),
+                  ),
+                ] else if (!answered && submissionError != null) ...[
+                  const SizedBox(height: AppSpacing.xl),
+                  Text(
+                    submissionError!,
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: theme.colorScheme.error,
+                    ),
+                  ),
+                ],
 
                 if (answered) ...[
                   const SizedBox(height: AppSpacing.xl),
@@ -475,7 +539,7 @@ class _RoundView extends StatelessWidget {
                         const SizedBox(height: AppSpacing.md),
 
                         Text(
-                          round.explanation,
+                          answerResult!.explanation,
 
                           style: theme.textTheme.bodyMedium?.copyWith(
                             height: 1.55,
@@ -484,7 +548,7 @@ class _RoundView extends StatelessWidget {
 
                         const SizedBox(height: AppSpacing.md),
 
-                        _SourceSummary(source: round.correctImage),
+                        _SourceSummary(source: answerResult!.correctSource),
 
                         const SizedBox(height: AppSpacing.sm),
 
@@ -537,8 +601,9 @@ class _ImageCard extends StatelessWidget {
 
   final bool selected;
   final bool answered;
+  final bool submitting;
 
-  final String correctSide;
+  final String? correctSide;
 
   final VoidCallback onTap;
 
@@ -547,6 +612,7 @@ class _ImageCard extends StatelessWidget {
     required this.source,
     required this.selected,
     required this.answered,
+    required this.submitting,
     required this.correctSide,
     required this.onTap,
   });
@@ -555,7 +621,7 @@ class _ImageCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    final correct = correctSide == side;
+    final correct = answered && correctSide == side;
 
     var borderColor = theme.colorScheme.outlineVariant;
 
@@ -580,7 +646,7 @@ class _ImageCard extends StatelessWidget {
         clipBehavior: Clip.antiAlias,
 
         child: InkWell(
-          onTap: answered ? null : onTap,
+          onTap: answered || submitting ? null : onTap,
 
           child: AnimatedContainer(
             duration: AppMotion.fast,
@@ -678,9 +744,16 @@ class _ImageCard extends StatelessWidget {
 
                       if (!answered)
                         FilledButton.tonal(
-                          onPressed: onTap,
+                          onPressed: submitting ? null : onTap,
 
-                          child: const Text('Pick this'),
+                          child: submitting && selected
+                              ? const SizedBox.square(
+                                  dimension: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Text('Pick this'),
                         )
                       else
                         Icon(
@@ -709,7 +782,7 @@ class _ImageCard extends StatelessWidget {
 }
 
 class _SourceSummary extends StatelessWidget {
-  final ImageComparisonSource source;
+  final ImageComparisonSourceFeedback source;
 
   const _SourceSummary({required this.source});
 
@@ -828,11 +901,15 @@ class _CompleteView extends StatelessWidget {
   final int total;
 
   final Future<void> Function() onAnotherSet;
+  final bool preparingAnotherSet;
+  final String? refreshError;
 
   const _CompleteView({
     required this.score,
     required this.total,
     required this.onAnotherSet,
+    required this.preparingAnotherSet,
+    required this.refreshError,
   });
 
   @override
@@ -888,6 +965,34 @@ class _CompleteView extends StatelessWidget {
 
                   const SizedBox(height: AppSpacing.xl),
 
+                  if (preparingAnotherSet) ...[
+                    Semantics(
+                      liveRegion: true,
+                      label: 'Preparing another image set',
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          SizedBox.square(
+                            dimension: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                          SizedBox(width: AppSpacing.sm),
+                          Text('Preparing another set...'),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: AppSpacing.md),
+                  ] else if (refreshError != null) ...[
+                    Text(
+                      refreshError!,
+                      textAlign: TextAlign.center,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: theme.colorScheme.error,
+                      ),
+                    ),
+                    const SizedBox(height: AppSpacing.md),
+                  ],
+
                   Wrap(
                     spacing: AppSpacing.sm,
 
@@ -897,17 +1002,30 @@ class _CompleteView extends StatelessWidget {
 
                     children: [
                       OutlinedButton(
-                        onPressed: () => Navigator.pop(context),
+                        onPressed: preparingAnotherSet
+                            ? null
+                            : () => Navigator.pop(context),
 
                         child: const Text('Back to Verify'),
                       ),
 
                       FilledButton.icon(
-                        onPressed: onAnotherSet,
+                        onPressed: preparingAnotherSet ? null : onAnotherSet,
 
-                        icon: const Icon(Icons.refresh_rounded),
+                        icon: preparingAnotherSet
+                            ? const SizedBox.square(
+                                dimension: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Icon(Icons.refresh_rounded),
 
-                        label: const Text('Try another set'),
+                        label: Text(
+                          preparingAnotherSet
+                              ? 'Preparing another set...'
+                              : 'Try another set',
+                        ),
                       ),
                     ],
                   ),

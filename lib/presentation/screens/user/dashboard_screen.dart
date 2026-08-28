@@ -1,7 +1,6 @@
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart' show ScrollDirection;
 import 'package:provider/provider.dart';
 
 import '../../controllers/auth_controller.dart';
@@ -27,7 +26,8 @@ class _DashboardScreenState extends State<DashboardScreen>
     with SingleTickerProviderStateMixin {
   int _currentIndex = 0;
   int _tabDirection = 1;
-  bool _navMinimized = false;
+  final _navMinimized = ValueNotifier<bool>(false);
+  final _navScrollBehavior = FloatingNavigationScrollBehavior();
   late final AnimationController _tabController;
   late final Animation<double> _tabCurve;
 
@@ -84,40 +84,46 @@ class _DashboardScreenState extends State<DashboardScreen>
   @override
   void dispose() {
     _tabController.dispose();
+    _navMinimized.dispose();
     super.dispose();
   }
 
   void _select(int index) {
     if (_currentIndex == index) {
-      if (_navMinimized) setState(() => _navMinimized = false);
+      _restoreNavigation();
       return;
     }
 
+    _restoreNavigation();
     setState(() {
       _tabDirection = index > _currentIndex ? 1 : -1;
       _currentIndex = index;
-      _navMinimized = false;
     });
     _tabController.forward(from: 0);
   }
 
-  void _setNavMinimized(bool value) {
-    if (_navMinimized == value || !mounted) return;
-    setState(() => _navMinimized = value);
+  void _restoreNavigation() {
+    _navScrollBehavior.restore();
+    if (_navMinimized.value) _navMinimized.value = false;
   }
 
-  bool _handleUserScroll(UserScrollNotification notification) {
+  bool _handleUserScroll(ScrollNotification notification) {
     if (notification.metrics.axis != Axis.vertical) return false;
 
-    if (notification.metrics.pixels <= 6) {
-      _setNavMinimized(false);
-      return false;
-    }
-
-    if (notification.direction == ScrollDirection.reverse) {
-      _setNavMinimized(true);
-    } else if (notification.direction == ScrollDirection.forward) {
-      _setNavMinimized(false);
+    if (notification is ScrollUpdateNotification) {
+      final changed = _navScrollBehavior.update(
+        pixels: notification.metrics.pixels,
+        delta: notification.scrollDelta ?? 0,
+      );
+      if (changed) _navMinimized.value = _navScrollBehavior.minimized;
+    } else if (notification is OverscrollNotification) {
+      final changed = _navScrollBehavior.update(
+        pixels: notification.metrics.pixels,
+        delta: notification.overscroll,
+      );
+      if (changed) _navMinimized.value = _navScrollBehavior.minimized;
+    } else if (notification is ScrollEndNotification) {
+      _navScrollBehavior.stop();
     }
     return false;
   }
@@ -225,7 +231,7 @@ class _DashboardScreenState extends State<DashboardScreen>
         return Scaffold(
           extendBody: true,
           body: _LearnerAmbientBackground(
-            child: NotificationListener<UserScrollNotification>(
+            child: NotificationListener<ScrollNotification>(
               onNotification: _handleUserScroll,
               child: Stack(
                 children: [
@@ -248,12 +254,16 @@ class _DashboardScreenState extends State<DashboardScreen>
                     left: 0,
                     right: 0,
                     bottom: 0,
-                    child: FloatingGlassNavigation(
-                      selectedIndex: _currentIndex,
-                      destinations: _destinations,
-                      onSelected: _select,
-                      minimized: _navMinimized,
-                      showSelectedLabel: constraints.maxWidth >= 420,
+                    child: ValueListenableBuilder<bool>(
+                      valueListenable: _navMinimized,
+                      builder: (context, minimized, _) =>
+                          FloatingGlassNavigation(
+                            selectedIndex: _currentIndex,
+                            destinations: _destinations,
+                            onSelected: _select,
+                            minimized: minimized,
+                            showSelectedLabel: constraints.maxWidth >= 420,
+                          ),
                     ),
                   ),
                 ],

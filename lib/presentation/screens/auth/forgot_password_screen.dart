@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../controllers/auth_controller.dart';
-import '../../../data/models/auth_otp_request.dart';
 import '../../../core/routes/app_routes.dart';
 import '../../widgets/auth_shell.dart';
 
@@ -16,6 +15,7 @@ class ForgotPasswordScreen extends StatefulWidget {
 class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
   final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
+  String? _sentEmail;
 
   @override
   void dispose() {
@@ -29,21 +29,60 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
     final email = _emailController.text.trim();
     final success = await auth.sendPasswordReset(email);
     if (!mounted || !success) return;
-
-    Navigator.pushReplacementNamed(
-      context,
-      AppRoutes.verifyEmail,
-      arguments: AuthOtpRequest(email: email, purpose: AuthOtpPurpose.recovery),
-    );
+    setState(() => _sentEmail = email);
   }
 
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthController>();
+    final sentEmail = _sentEmail;
+    if (sentEmail != null) {
+      return AuthShell(
+        title: 'Check your email',
+        description:
+            'We sent you a password reset link. Open your email and follow the link to choose a new password.',
+        footer: TextButton(
+          onPressed: () => Navigator.pushNamedAndRemoveUntil(
+            context,
+            AppRoutes.login,
+            (_) => false,
+          ),
+          child: const Text('Back to sign in'),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Icon(
+              Icons.mark_email_read_outlined,
+              size: 64,
+              color: Theme.of(context).colorScheme.primary,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Reset link sent to $sentEmail',
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.titleSmall,
+            ),
+            const SizedBox(height: 24),
+            OutlinedButton.icon(
+              onPressed: auth.isLoading
+                  ? null
+                  : () {
+                      auth.clearError();
+                      setState(() => _sentEmail = null);
+                    },
+              icon: const Icon(Icons.refresh_rounded),
+              label: const Text('Send another link'),
+            ),
+          ],
+        ),
+      );
+    }
+
     return AuthShell(
       title: 'Reset password',
       description:
-          'Enter your registered email. PromptWise will send a 6-digit recovery code before allowing a password change.',
+          'Enter your registered email. PromptWise will send a secure link for choosing a new password.',
       footer: TextButton(
         onPressed: auth.isLoading
             ? null
@@ -86,7 +125,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
                   : const Icon(Icons.mark_email_read_outlined),
-              label: Text(auth.isLoading ? 'Sending...' : 'Send recovery code'),
+              label: Text(auth.isLoading ? 'Sending...' : 'Send reset link'),
             ),
           ],
         ),

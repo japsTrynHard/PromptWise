@@ -4,7 +4,7 @@ const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
     "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
 };
 
 const COMMONS_API = "https://commons.wikimedia.org/w/api.php";
@@ -40,6 +40,10 @@ Deno.serve(async (req) => {
     return new Response("ok", {
       headers: corsHeaders,
     });
+  }
+
+  if (req.method === "GET") {
+    return proxyRoundImage(req);
   }
 
   if (req.method !== "POST") {
@@ -183,21 +187,22 @@ Deno.serve(async (req) => {
         {
           message:
             "Fresh image examples could not be prepared right now. Please try again in a moment.",
-
-          rounds,
         },
         503,
       );
     }
 
     await recordExposure(client, userId, rounds);
+    await recordRoundAssignments(client, userId, rounds);
+
+    const challengeRounds = rounds.map((round) =>
+      toChallengePayload(round, supabaseUrl)
+    );
 
     return json({
-      rounds,
+      rounds: challengeRounds,
 
       source: "Wikimedia Commons",
-
-      strategy: "pooled_parallel_fetch",
     });
   } catch (error) {
     console.error(error);
@@ -325,6 +330,153 @@ async function recordExposure(
     }
   } catch (error) {
     console.warn("Could not save verification media exposure:", error);
+  }
+}
+
+async function recordRoundAssignments(
+  client: SupabaseAdmin,
+  userId: string,
+  rounds: JsonRecord[],
+): Promise<void> {
+  const servedAt = new Date();
+  const expiresAt = new Date(servedAt.getTime() + 60 * 60 * 1000);
+  const payload = rounds.map((round) => {
+    const imageA = asRecord(round.image_a);
+    const imageB = asRecord(round.image_b);
+    const correctSide = String(round.correct_side ?? "").trim().toUpperCase();
+    const correctSource = correctSide === "A" ? imageA : imageB;
+    return {
+      user_id: userId,
+      round_id: String(round.id ?? "").trim(),
+      correct_side: correctSide,
+      explanation: String(round.explanation ?? "").trim(),
+      correct_source: toFeedbackPayload(correctSource),
+      image_a_url: String(imageA.image_url ?? "").trim(),
+      image_b_url: String(imageB.image_url ?? "").trim(),
+      served_at: servedAt.toISOString(),
+      expires_at: expiresAt.toISOString(),
+    };
+  }).filter((round) =>
+    round.round_id &&
+    (round.correct_side === "A" || round.correct_side === "B") &&
+    round.explanation &&
+    round.image_a_url &&
+    round.image_b_url
+  );
+
+  if (payload.length !== rounds.length) {
+    throw new HttpError(503, "Image round assignments were incomplete.");
+  }
+
+  const { error } = await client
+    .from("verification_media_rounds")
+    .insert(payload);
+  if (error) {
+    console.error("Could not save image round assignments:", error.message);
+    throw new HttpError(
+      503,
+      "Fresh image examples could not be prepared right now.",
+    );
+  }
+}
+
+function toChallengePayload(
+  round: JsonRecord,
+  supabaseUrl: string,
+): JsonRecord {
+  const roundId = String(round.id ?? "").trim();
+  const baseUrl = supabaseUrl.replace(/\/+$/, "");
+  const imageUrl = (side: "A" | "B") =>
+    `${baseUrl}/functions/v1/verification-media?round_id=${encodeURIComponent(roundId)}&side=${side}`;
+
+  return {
+    id: roundId,
+    topic: String(round.topic ?? "online image"),
+    question: String(
+      round.question ?? "Which image does its source identify as AI-made?",
+    ),
+    hint: String(
+      round.hint ??
+        "Make your best guess first. PromptWise will verify it with the source.",
+    ),
+    image_a: { id: `${roundId}:A`, image_url: imageUrl("A") },
+    image_b: { id: `${roundId}:B`, image_url: imageUrl("B") },
+  };
+}
+
+function toFeedbackPayload(source: JsonRecord): JsonRecord {
+  return {
+    title: String(source.title ?? "Source-labeled image").trim(),
+    source_page_url: String(source.source_page_url ?? "").trim(),
+    creator: String(source.creator ?? "").trim(),
+    license: String(source.license ?? "").trim(),
+  };
+}
+
+async function proxyRoundImage(req: Request): Promise<Response> {
+  try {
+    const requestUrl = new URL(req.url);
+    const roundId = requestUrl.searchParams.get("round_id")?.trim() ?? "";
+    const side = requestUrl.searchParams.get("side")?.trim().toUpperCase() ?? "";
+    if (!roundId || (side !== "A" && side !== "B")) {
+      throw new HttpError(400, "Image request is invalid.");
+    }
+
+    const client = createClient(
+      requireEnv("SUPABASE_URL"),
+      requireEnv("SUPABASE_SERVICE_ROLE_KEY"),
+      { auth: { persistSession: false, autoRefreshToken: false } },
+    );
+    const { data, error } = await client
+      .from("verification_media_rounds")
+      .select("image_a_url,image_b_url,expires_at")
+      .eq("round_id", roundId)
+      .maybeSingle();
+    if (error || !data) {
+      throw new HttpError(404, "Image round was not found.");
+    }
+    if (new Date(String(data.expires_at)).getTime() < Date.now()) {
+      throw new HttpError(410, "Image round has expired.");
+    }
+
+    const rawImageUrl = String(
+      side === "A" ? data.image_a_url : data.image_b_url,
+    ).trim();
+    const imageUrl = new URL(rawImageUrl);
+    if (
+      imageUrl.protocol !== "https:" ||
+      imageUrl.hostname !== "upload.wikimedia.org"
+    ) {
+      throw new HttpError(502, "Stored image source is invalid.");
+    }
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 12_000);
+    let upstream: Response;
+    try {
+      upstream = await fetch(imageUrl, {
+        headers: { Accept: "image/*" },
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+    const contentType = upstream.headers.get("content-type") ?? "";
+    if (!upstream.ok || !contentType.toLowerCase().startsWith("image/")) {
+      throw new HttpError(502, "Source image could not be loaded.");
+    }
+    return new Response(upstream.body, {
+      status: 200,
+      headers: {
+        ...corsHeaders,
+        "Content-Type": contentType,
+        "Cache-Control": "private, max-age=3600",
+      },
+    });
+  } catch (error) {
+    const status = error instanceof HttpError ? error.status : 502;
+    if (status >= 500) console.error("Image proxy failed:", errorMessage(error));
+    return json({ message: errorMessage(error) }, status);
   }
 }
 
@@ -531,7 +683,7 @@ function buildRounds({
 
     usedIds.add(real.image.id);
 
-    const id = `${ai.image.id}:${real.image.id}`;
+    const id = crypto.randomUUID();
 
     if (rounds.some((item) => String(item.id ?? "") === id)) {
       continue;

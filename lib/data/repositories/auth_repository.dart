@@ -4,15 +4,46 @@ import '../../core/config/app_environment.dart';
 import '../models/app_profile.dart';
 import '../models/auth_otp_request.dart';
 
-class AuthRepository {
+abstract interface class AuthGateway {
+  Session? get currentSession;
+  Stream<AuthState> get authStateChanges;
+
+  Future<AuthResponse> signUp({
+    required String fullName,
+    required String email,
+    required String password,
+  });
+  Future<AuthResponse> signIn({
+    required String email,
+    required String password,
+  });
+  Future<void> sendSignInOtp(String email);
+  Future<AuthResponse> verifyEmailOtp({
+    required String email,
+    required String token,
+    required AuthOtpPurpose purpose,
+  });
+  Future<void> signOut();
+  Future<void> resendSignupConfirmation(String email);
+  Future<void> sendPasswordReset(String email);
+  Future<void> updatePassword(String password);
+  Future<AppProfile?> fetchMyProfile(String userId);
+  Future<AppProfile> updateMyFullName(String fullName);
+  Future<List<AppProfile>> fetchAllProfiles();
+}
+
+class AuthRepository implements AuthGateway {
   final SupabaseClient client;
 
   const AuthRepository(this.client);
 
+  @override
   Session? get currentSession => client.auth.currentSession;
   User? get currentUser => client.auth.currentUser;
+  @override
   Stream<AuthState> get authStateChanges => client.auth.onAuthStateChange;
 
+  @override
   Future<AuthResponse> signUp({
     required String fullName,
     required String email,
@@ -26,6 +57,7 @@ class AuthRepository {
     );
   }
 
+  @override
   Future<AuthResponse> signIn({
     required String email,
     required String password,
@@ -36,6 +68,7 @@ class AuthRepository {
     );
   }
 
+  @override
   Future<void> sendSignInOtp(String email) {
     return client.auth.signInWithOtp(
       email: email.trim(),
@@ -44,6 +77,7 @@ class AuthRepository {
     );
   }
 
+  @override
   Future<AuthResponse> verifyEmailOtp({
     required String email,
     required String token,
@@ -52,7 +86,6 @@ class AuthRepository {
     final type = switch (purpose) {
       AuthOtpPurpose.signup => OtpType.email,
       AuthOtpPurpose.signIn => OtpType.email,
-      AuthOtpPurpose.recovery => OtpType.recovery,
     };
 
     return client.auth.verifyOTP(
@@ -62,8 +95,10 @@ class AuthRepository {
     );
   }
 
+  @override
   Future<void> signOut() => client.auth.signOut();
 
+  @override
   Future<void> resendSignupConfirmation(String email) async {
     await client.auth.resend(
       type: OtpType.signup,
@@ -72,6 +107,7 @@ class AuthRepository {
     );
   }
 
+  @override
   Future<void> sendPasswordReset(String email) {
     return client.auth.resetPasswordForEmail(
       email.trim(),
@@ -79,10 +115,12 @@ class AuthRepository {
     );
   }
 
+  @override
   Future<void> updatePassword(String password) async {
     await client.auth.updateUser(UserAttributes(password: password));
   }
 
+  @override
   Future<AppProfile?> fetchMyProfile(String userId) async {
     final data = await client
         .from('profiles')
@@ -94,6 +132,7 @@ class AuthRepository {
     return AppProfile.fromMap(data);
   }
 
+  @override
   Future<AppProfile> updateMyFullName(String fullName) async {
     final data = await client.rpc(
       'update_my_profile',
@@ -109,6 +148,7 @@ class AuthRepository {
     throw const FormatException('Profile update returned no profile data.');
   }
 
+  @override
   Future<List<AppProfile>> fetchAllProfiles() async {
     final data = await client
         .from('profiles')

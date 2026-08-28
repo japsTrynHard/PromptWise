@@ -32,6 +32,11 @@ import './data/services/verification_media_service.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  if (!AppEnvironment.isSupabaseConfigured) {
+    runApp(const _MissingBackendConfigurationApp());
+    return;
+  }
+
   AuthRepository? authRepository;
   AdaptiveLearningRepository? adaptiveLearningRepository;
   ProgressRepository? progressRepository;
@@ -146,12 +151,16 @@ Future<void> main() async {
             return adaptive;
           },
         ),
-        ChangeNotifierProxyProvider<AuthController, LearningProgressionController>(
+        ChangeNotifierProxyProvider<
+          AuthController,
+          LearningProgressionController
+        >(
           create: (_) => LearningProgressionController(
             repository: learningProgressionRepository,
           ),
           update: (_, auth, controller) {
-            final progression = controller ??
+            final progression =
+                controller ??
                 LearningProgressionController(
                   repository: learningProgressionRepository,
                 );
@@ -159,32 +168,45 @@ Future<void> main() async {
             return progression;
           },
         ),
-        ChangeNotifierProxyProvider<AuthController, ContentAutomationController>(
+        ChangeNotifierProxyProvider<
+          AuthController,
+          ContentAutomationController
+        >(
           create: (_) => ContentAutomationController(
             repository: contentAutomationRepository,
           ),
           update: (_, auth, controller) {
-            final automation = controller ??
+            final automation =
+                controller ??
                 ContentAutomationController(
                   repository: contentAutomationRepository,
                 );
-            unawaited(automation.bindAdministrator(auth.isAdministrator));
+            unawaited(
+              automation.bindAdministrator(
+                auth.isAdministrator,
+                userId: auth.userId,
+              ),
+            );
             return automation;
           },
         ),
         ChangeNotifierProxyProvider<AuthController, VerificationController>(
-          create: (_) => VerificationController(repository: verificationRepository),
+          create: (_) =>
+              VerificationController(repository: verificationRepository),
           update: (_, auth, controller) {
-            final verification = controller ??
+            final verification =
+                controller ??
                 VerificationController(repository: verificationRepository);
             unawaited(verification.bindAuthenticatedUser(auth.userId));
             return verification;
           },
         ),
         ChangeNotifierProxyProvider<AuthController, ImageComparisonController>(
-          create: (_) => ImageComparisonController(service: verificationMediaService),
+          create: (_) =>
+              ImageComparisonController(service: verificationMediaService),
           update: (_, auth, controller) {
-            final comparison = controller ??
+            final comparison =
+                controller ??
                 ImageComparisonController(service: verificationMediaService);
             unawaited(comparison.bindAuthenticatedUser(auth.userId));
             return comparison;
@@ -193,19 +215,25 @@ Future<void> main() async {
         ChangeNotifierProxyProvider<AuthController, AwarenessFeedController>(
           create: (_) => AwarenessFeedController(service: awarenessFeedService),
           update: (_, auth, controller) {
-            final awareness = controller ??
+            final awareness =
+                controller ??
                 AwarenessFeedController(service: awarenessFeedService);
             unawaited(awareness.bindAuthenticatedUser(auth.userId));
             return awareness;
           },
         ),
-        ChangeNotifierProxyProvider<AuthController, VerificationStudioController>(
-          create: (_) => VerificationStudioController(
-            repository: verificationRepository,
-          ),
+        ChangeNotifierProxyProvider<
+          AuthController,
+          VerificationStudioController
+        >(
+          create: (_) =>
+              VerificationStudioController(repository: verificationRepository),
           update: (_, auth, controller) {
-            final studio = controller ??
-                VerificationStudioController(repository: verificationRepository);
+            final studio =
+                controller ??
+                VerificationStudioController(
+                  repository: verificationRepository,
+                );
             unawaited(studio.bindAdministrator(auth.isAdministrator));
             return studio;
           },
@@ -216,7 +244,8 @@ Future<void> main() async {
             repository: promptCoachRepository,
           ),
           update: (_, auth, controller) {
-            final coach = controller ??
+            final coach =
+                controller ??
                 SandboxController(
                   service: integrationService,
                   repository: promptCoachRepository,
@@ -230,4 +259,49 @@ Future<void> main() async {
       child: const PromptWiseApp(),
     ),
   );
+}
+
+class _MissingBackendConfigurationApp extends StatelessWidget {
+  const _MissingBackendConfigurationApp();
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      home: Scaffold(
+        body: SafeArea(
+          child: Center(
+            child: Padding(
+              padding: EdgeInsets.all(32),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: 560),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.settings_outlined, size: 56),
+                    SizedBox(height: 20),
+                    Text(
+                      'PromptWise backend is not configured',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 24,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    SizedBox(height: 12),
+                    Text(
+                      'Start the app with valid SUPABASE_URL and '
+                      'SUPABASE_PUBLISHABLE_KEY dart-defines. No secret or '
+                      'service-role key belongs in the Flutter application.',
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }

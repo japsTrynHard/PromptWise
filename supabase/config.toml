@@ -20,3 +20,8 @@ verify_jwt = false
 # itself, discovers current trusted news, and refreshes the cached feed.
 [functions.awareness-feed]
 verify_jwt = false
+
+# Lesson dictionary proxy. The function validates the learner JWT itself and
+# keeps browser clients independent of third-party CORS behavior.
+[functions.dictionary-lookup]
+verify_jwt = false

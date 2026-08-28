@@ -8,9 +8,11 @@ class LearningProgressionController extends ChangeNotifier {
   final LearningProgressionRepository? _repository;
 
   LearningProgressionController({LearningProgressionRepository? repository})
-      : _repository = repository;
+    : _repository = repository;
 
   String? _activeUserId;
+  int _requestEpoch = 0;
+  bool _disposed = false;
   bool _isLoading = false;
   bool _isStartingSession = false;
   bool _isSubmittingAnswer = false;
@@ -45,7 +47,8 @@ class LearningProgressionController extends ChangeNotifier {
   KnowledgeCheckSummary? get summary => _summary;
   int get questionIndex => _questionIndex;
   Map<String, int> get selectedAnswers => Map.unmodifiable(_selectedAnswers);
-  Map<String, KnowledgeAnswerFeedback> get feedback => Map.unmodifiable(_feedback);
+  Map<String, KnowledgeAnswerFeedback> get feedback =>
+      Map.unmodifiable(_feedback);
 
   bool get hasActiveSession => _session != null && _summary == null;
   bool get isSessionComplete => _summary != null;
@@ -98,8 +101,14 @@ class LearningProgressionController extends ChangeNotifier {
   }
 
   Future<void> bindAuthenticatedUser(String? userId) async {
+    if (_disposed) return;
     if (_activeUserId == userId) return;
     _activeUserId = userId;
+    _requestEpoch++;
+    _isLoading = false;
+    _isStartingSession = false;
+    _isSubmittingAnswer = false;
+    _isCompletingSession = false;
     _clearSession(notify: false);
     _hasLoaded = false;
     _lastLoadedAt = null;
@@ -125,28 +134,33 @@ class LearningProgressionController extends ChangeNotifier {
     Duration maxAge = const Duration(minutes: 5),
   }) async {
     final last = _lastLoadedAt;
-    if (_hasLoaded && last != null && DateTime.now().difference(last) < maxAge) {
+    if (_hasLoaded &&
+        last != null &&
+        DateTime.now().difference(last) < maxAge) {
       return;
     }
     await refresh(force: false);
   }
 
   Future<void> refresh({bool force = true}) {
+    if (_disposed) return Future<void>.value();
     final existing = _refreshFuture;
     if (existing != null) return existing;
 
     final userId = _activeUserId;
+    final epoch = _requestEpoch;
     final repository = _repository;
     if (userId == null || repository == null) return Future<void>.value();
     if (!force &&
         _hasLoaded &&
         _lastLoadedAt != null &&
-        DateTime.now().difference(_lastLoadedAt!) < const Duration(minutes: 5)) {
+        DateTime.now().difference(_lastLoadedAt!) <
+            const Duration(minutes: 5)) {
       return Future<void>.value();
     }
 
     late final Future<void> future;
-    future = _refreshInternal(userId, repository).whenComplete(() {
+    future = _refreshInternal(userId, epoch, repository).whenComplete(() {
       if (identical(_refreshFuture, future)) _refreshFuture = null;
     });
     _refreshFuture = future;
@@ -155,6 +169,7 @@ class LearningProgressionController extends ChangeNotifier {
 
   Future<void> _refreshInternal(
     String userId,
+    int epoch,
     LearningProgressionRepository repository,
   ) async {
     _isLoading = true;
@@ -166,7 +181,7 @@ class LearningProgressionController extends ChangeNotifier {
         repository.fetchObjectives(),
         repository.fetchTopicRanks(userId),
       ]);
-      if (_activeUserId != userId) return;
+      if (!_isCurrent(userId, epoch)) return;
       _objectives = List<LearningObjective>.from(results[0] as List);
       final fetchedRanks = List<LearnerTopicRank>.from(results[1] as List);
       _ranks = {
@@ -176,13 +191,16 @@ class LearningProgressionController extends ChangeNotifier {
       };
       _hasLoaded = true;
       _lastLoadedAt = DateTime.now();
-    } catch (_) {
-      if (_activeUserId == userId) {
+    } catch (error, stackTrace) {
+      if (kDebugMode) {
+        debugPrint('Learning progression refresh failed: $error\n$stackTrace');
+      }
+      if (_isCurrent(userId, epoch)) {
         _errorMessage =
             'Learning progression could not be refreshed. Try again when your connection is stable.';
       }
     } finally {
-      if (_activeUserId == userId) {
+      if (_isCurrent(userId, epoch)) {
         _isLoading = false;
         notifyListeners();
       }
@@ -195,7 +213,9 @@ class LearningProgressionController extends ChangeNotifier {
     String mode = 'adaptive',
   }) async {
     final repository = _repository;
-    if (_activeUserId == null || repository == null || _isStartingSession) {
+    final userId = _activeUserId;
+    final epoch = _requestEpoch;
+    if (userId == null || repository == null || _isStartingSession) {
       return false;
     }
 
@@ -209,15 +229,20 @@ class LearningProgressionController extends ChangeNotifier {
         focusTopic: focusTopic,
         mode: mode,
       );
+      if (!_isCurrent(userId, epoch)) return false;
       _session = session;
       _questionIndex = 0;
       return true;
     } catch (error) {
-      _errorMessage = _friendlyMessage(error);
+      if (_isCurrent(userId, epoch)) {
+        _errorMessage = _friendlyMessage(error);
+      }
       return false;
     } finally {
-      _isStartingSession = false;
-      notifyListeners();
+      if (_isCurrent(userId, epoch)) {
+        _isStartingSession = false;
+        notifyListeners();
+      }
     }
   }
 
@@ -225,9 +250,12 @@ class LearningProgressionController extends ChangeNotifier {
     final repository = _repository;
     final currentSession = _session;
     final question = currentQuestion;
+    final userId = _activeUserId;
+    final epoch = _requestEpoch;
     if (repository == null ||
         currentSession == null ||
         question == null ||
+        userId == null ||
         _isSubmittingAnswer ||
         _feedback.containsKey(question.id)) {
       return null;
@@ -245,15 +273,24 @@ class LearningProgressionController extends ChangeNotifier {
         questionId: question.id,
         selectedIndex: selectedIndex,
       );
+      if (!_isCurrent(userId, epoch) ||
+          _session?.id != currentSession.id ||
+          currentQuestion?.id != question.id) {
+        return null;
+      }
       _selectedAnswers[question.id] = selectedIndex;
       _feedback[question.id] = result;
       return result;
     } catch (error) {
-      _errorMessage = _friendlyMessage(error);
+      if (_isCurrent(userId, epoch)) {
+        _errorMessage = _friendlyMessage(error);
+      }
       return null;
     } finally {
-      _isSubmittingAnswer = false;
-      notifyListeners();
+      if (_isCurrent(userId, epoch)) {
+        _isSubmittingAnswer = false;
+        notifyListeners();
+      }
     }
   }
 
@@ -280,7 +317,12 @@ class LearningProgressionController extends ChangeNotifier {
   Future<bool> completeSession() async {
     final repository = _repository;
     final current = _session;
-    if (repository == null || current == null || _isCompletingSession) {
+    final userId = _activeUserId;
+    final epoch = _requestEpoch;
+    if (repository == null ||
+        current == null ||
+        userId == null ||
+        _isCompletingSession) {
       return false;
     }
     if (_feedback.length < current.questions.length) return false;
@@ -290,6 +332,9 @@ class LearningProgressionController extends ChangeNotifier {
     notifyListeners();
     try {
       final result = await repository.completeKnowledgeCheck(current.id);
+      if (!_isCurrent(userId, epoch) || _session?.id != current.id) {
+        return false;
+      }
       _summary = result;
       if (result.ranks.isNotEmpty) {
         _ranks = {
@@ -301,17 +346,23 @@ class LearningProgressionController extends ChangeNotifier {
       _lastLoadedAt = DateTime.now();
       return true;
     } catch (error) {
-      _errorMessage = _friendlyMessage(error);
+      if (_isCurrent(userId, epoch)) {
+        _errorMessage = _friendlyMessage(error);
+      }
       return false;
     } finally {
-      _isCompletingSession = false;
-      notifyListeners();
+      if (_isCurrent(userId, epoch)) {
+        _isCompletingSession = false;
+        notifyListeners();
+      }
     }
   }
 
   Future<void> abandonSession() async {
     final current = _session;
     final repository = _repository;
+    final userId = _activeUserId;
+    final epoch = _requestEpoch;
     if (current == null) {
       _clearSession(notify: true);
       return;
@@ -319,11 +370,15 @@ class LearningProgressionController extends ChangeNotifier {
     if (repository != null && _summary == null) {
       try {
         await repository.abandonKnowledgeCheck(current.id);
-      } catch (_) {
+      } catch (error, stackTrace) {
+        if (kDebugMode) {
+          debugPrint('Knowledge-check abandon failed: $error\n$stackTrace');
+        }
         // Leaving the page must still be possible if the connection drops.
         // A future session start also closes stale active sessions server-side.
       }
     }
+    if (userId != null && !_isCurrent(userId, epoch)) return;
     _clearSession(notify: true);
   }
 
@@ -342,6 +397,16 @@ class LearningProgressionController extends ChangeNotifier {
     _feedback.clear();
     _summary = null;
     if (notify) notifyListeners();
+  }
+
+  bool _isCurrent(String userId, int epoch) =>
+      !_disposed && _activeUserId == userId && _requestEpoch == epoch;
+
+  @override
+  void dispose() {
+    _disposed = true;
+    _requestEpoch++;
+    super.dispose();
   }
 
   String _friendlyMessage(Object error) {

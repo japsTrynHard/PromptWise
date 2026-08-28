@@ -7,23 +7,38 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../core/config/app_environment.dart';
 import '../models/image_comparison.dart';
 
-class VerificationMediaService {
+abstract interface class VerificationMediaGateway {
+  Future<List<ImageComparisonRound>> fetchRounds({
+    int count = 5,
+    Set<String> seenIds = const {},
+  });
+
+  Future<ImageComparisonAttemptResult> submitAttempt({
+    required String roundId,
+    required String selectedSide,
+  });
+}
+
+class VerificationMediaService implements VerificationMediaGateway {
   VerificationMediaService({
     required SupabaseClient client,
     http.Client? httpClient,
-  })  : _client = client,
-        _http = httpClient ?? http.Client();
+  }) : _client = client,
+       _http = httpClient ?? http.Client();
 
   final SupabaseClient _client;
   final http.Client _http;
 
+  @override
   Future<List<ImageComparisonRound>> fetchRounds({
     int count = 5,
     Set<String> seenIds = const {},
   }) async {
     final token = _client.auth.currentSession?.accessToken;
     if (token == null || token.isEmpty) {
-      throw const VerificationMediaException('Please sign in again to continue.');
+      throw const VerificationMediaException(
+        'Please sign in again to continue.',
+      );
     }
 
     final uri = Uri.parse(
@@ -90,6 +105,47 @@ class VerificationMediaService {
       );
     }
     return List.unmodifiable(rounds);
+  }
+
+  @override
+  Future<ImageComparisonAttemptResult> submitAttempt({
+    required String roundId,
+    required String selectedSide,
+  }) async {
+    final response = await _client
+        .rpc(
+          'submit_image_comparison_attempt',
+          params: {
+            'p_round_id': roundId.trim(),
+            'p_selected_side': selectedSide.trim().toUpperCase(),
+          },
+        )
+        .timeout(const Duration(seconds: 15));
+    if (response is Map) {
+      final result = ImageComparisonAttemptResult.fromMap(
+        Map<String, dynamic>.from(response),
+      );
+      if (result.roundId != roundId.trim()) {
+        throw const VerificationMediaException(
+          'The image feedback did not match the selected round.',
+        );
+      }
+      return result;
+    }
+    if (response is List && response.isNotEmpty && response.first is Map) {
+      final result = ImageComparisonAttemptResult.fromMap(
+        Map<String, dynamic>.from(response.first as Map),
+      );
+      if (result.roundId != roundId.trim()) {
+        throw const VerificationMediaException(
+          'The image feedback did not match the selected round.',
+        );
+      }
+      return result;
+    }
+    throw const VerificationMediaException(
+      'Your answer could not be recorded right now.',
+    );
   }
 
   void dispose() => _http.close();

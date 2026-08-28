@@ -8,7 +8,9 @@ Supabase Dashboard configuration
 2. Authentication > URL Configuration
    - Site URL for local web: http://localhost:3000
    - Add redirect URL: http://localhost:3000
+   - If development uses changing localhost paths, also allow: http://localhost:3000/**
    - Add mobile redirect URL: io.promptwise.app://auth-callback/
+     This must match AppEnvironment and the Android/iOS URL handlers exactly.
    - Add the deployed Flutter web origin when available.
 
 3. Authentication > Emails > SMTP Settings / Custom SMTP
@@ -18,13 +20,19 @@ Supabase Dashboard configuration
 4. Authentication > Emails > Templates
    - Confirm sign up: setup/email_templates/confirm_signup.html
    - Magic Link / OTP: setup/email_templates/magic_link_otp.html
-   - Reset password: setup/email_templates/reset_password.html
+   - Password recovery is link-based. The default Supabase Reset Password
+     email already supplies the required recovery link.
+   - setup/email_templates/reset_password.html is a link-only template for use
+     if template editing becomes available later; it is not required now.
 
-5. SQL Editor
-   Run in order only when needed:
-   - supabase/migrations/20260805_phase3_auth_progress.sql
-   - supabase/migrations/20260805_phase4_dynamic_content.sql
-   - supabase/migrations/20260805_phase4_completion_realtime.sql
+5. Database migrations
+   Do not rerun supabase/CURRENT_DB_ONE_RUN.sql on the existing linked project.
+   From the repository root, inspect and then apply forward-only migrations:
+   - npx supabase migration list
+   - npx supabase db push --dry-run
+   - npx supabase db push
+
+   Deploy database-dependent Edge Functions only after their migration is live.
 
 6. First administrator
    Register/create the user, then edit and run:

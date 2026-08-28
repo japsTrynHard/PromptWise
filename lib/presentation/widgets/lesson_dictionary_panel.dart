@@ -199,6 +199,14 @@ class _LessonDictionaryPanelState extends State<LessonDictionaryPanel> {
               );
             },
           ),
+          if (_controller.isLoading) ...[
+            const SizedBox(height: AppSpacing.md),
+            Semantics(
+              liveRegion: true,
+              label: 'Looking up the word',
+              child: LinearProgressIndicator(),
+            ),
+          ],
           if (_controller.message != null) ...[
             const SizedBox(height: AppSpacing.md),
             _DictionaryMessage(

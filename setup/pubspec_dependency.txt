@@ -1,5 +1,7 @@
 Run this from the Flutter project root:
 
 flutter pub add supabase_flutter:^2.16.0
+flutter pub add url_launcher:^6.3.2
 
-The existing project must also keep its current provider and shared_preferences dependencies.
+The existing project must also keep its current provider, http, and
+shared_preferences dependencies.

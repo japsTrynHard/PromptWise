@@ -36,16 +36,25 @@ CURRENT PROMPTWISE DATABASE - RECOMMENDED SETUP
 
    The removed `.temp` folder will be recreated automatically.
 
-3. Run CURRENT_DB_ONE_RUN.sql ONE TIME in:
-   Supabase Dashboard -> SQL Editor -> New query -> paste all -> Run
+3. Do NOT rerun CURRENT_DB_ONE_RUN.sql on the current linked database.
 
-   This is an idempotent finalizer for the EXISTING PromptWise database.
-   It finalizes the current Phase 9 AI Awareness / Verify database settings,
-   AI-only feed rules, trusted sources, learner feed RPC, cleanup, and scheduler.
+   It is retained only as a historical setup/finalizer snapshot. The linked
+   database already records the 20260825022448 migration as applied. New work
+   must move forward through additive files under supabase/migrations/.
+
+   Before applying a new migration, inspect the plan first:
+
+   npx supabase migration list
+   npx supabase db push --dry-run
+
+   Then apply only after the dry run contains the expected new migration:
+
+   npx supabase db push
 
 4. Deploy the current Edge Functions:
 
    npx supabase functions deploy awareness-feed --use-api --no-verify-jwt
+   npx supabase functions deploy dictionary-lookup --use-api --no-verify-jwt
    npx supabase functions deploy content-automation --use-api --no-verify-jwt
    npx supabase functions deploy verification-media --use-api --no-verify-jwt
    npx supabase functions deploy promptwise-integrations --use-api --no-verify-jwt
@@ -63,8 +72,8 @@ IMPORTANT
 - Do NOT put the Supabase service-role key in Flutter.
 - Existing Supabase secrets stay on the Supabase project and do not need to be
   copied into this folder.
-- CURRENT_DB_ONE_RUN.sql is for the CURRENT existing PromptWise database.
-  It is not a complete from-zero bootstrap for a brand-new empty Supabase project.
+- CURRENT_DB_ONE_RUN.sql is a historical finalizer snapshot. Do not rerun it on
+  the existing linked database and do not treat it as a from-zero bootstrap.
 - For future schema changes, the standard approach is: create a new migration
   under `supabase/migrations/` instead of adding more PHASE*_ONE_RUN.sql files
   to the root.

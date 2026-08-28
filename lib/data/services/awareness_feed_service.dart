@@ -25,12 +25,20 @@ class AwarenessFeedService {
   DateTime? _cacheFetchedAt;
   DateTime? _lastStaleCheckAt;
   bool _backgroundRefreshRunning = false;
+  DateTime? _lastSuccessfulRefreshAt;
+  final StreamController<void> _backgroundUpdates =
+      StreamController<void>.broadcast();
+  bool _disposed = false;
+
+  DateTime? get lastSuccessfulRefreshAt => _lastSuccessfulRefreshAt;
+  Stream<void> get backgroundUpdates => _backgroundUpdates.stream;
 
   Future<List<AwarenessArticle>> fetchFeed({
     AwarenessScope scope = AwarenessScope.forYou,
     AwarenessCategory? category,
     int limit = 80,
     bool refreshIfStale = true,
+    bool forceDatabaseRead = false,
   }) async {
     final userId = _client.auth.currentUser?.id;
     if (userId == null) {
@@ -39,7 +47,8 @@ class AwarenessFeedService {
 
     _bindCacheUser(userId);
     final now = DateTime.now();
-    if (_cache.isNotEmpty &&
+    if (!forceDatabaseRead &&
+        _cache.isNotEmpty &&
         _cacheFetchedAt != null &&
         now.difference(_cacheFetchedAt!) < _cacheTtl) {
       if (refreshIfStale) {
@@ -102,15 +111,16 @@ class AwarenessFeedService {
       final rows = response is List
           ? response
           : response is Map && response['items'] is List
-              ? response['items'] as List
-              : const <dynamic>[];
+          ? response['items'] as List
+          : const <dynamic>[];
       if (rows.isNotEmpty) {
         return _mapAwarenessRows(rows);
       }
     } on PostgrestException catch (error) {
       final code = (error.code ?? '').toUpperCase();
       final text = error.message.toLowerCase();
-      final missingRpc = code == 'PGRST202' ||
+      final missingRpc =
+          code == 'PGRST202' ||
           code == '42883' ||
           (text.contains('function') && text.contains('does not exist'));
       if (!missingRpc) {
@@ -209,15 +219,17 @@ class AwarenessFeedService {
     required AwarenessCategory? category,
     required int limit,
   }) {
-    final items = _cache.where((item) {
-      if (scope == AwarenessScope.philippines && !item.isPhilippines) {
-        return false;
-      }
-      if (category != null && item.category != category) {
-        return false;
-      }
-      return true;
-    }).toList(growable: false);
+    final items = _cache
+        .where((item) {
+          if (scope == AwarenessScope.philippines && !item.isPhilippines) {
+            return false;
+          }
+          if (category != null && item.category != category) {
+            return false;
+          }
+          return true;
+        })
+        .toList(growable: false);
 
     if (scope == AwarenessScope.latest) {
       items.sort((a, b) {
@@ -259,6 +271,7 @@ class AwarenessFeedService {
             // changed the server cache. A normal no-op stale check stays free.
             if (refreshed) {
               _cacheFetchedAt = null;
+              if (!_disposed) _backgroundUpdates.add(null);
             }
           })
           .catchError((_) {
@@ -290,14 +303,11 @@ class AwarenessFeedService {
     if (userId == null || articleId.isEmpty) {
       return;
     }
-    await _client.from('awareness_user_actions').upsert(
-      {
-        'user_id': userId,
-        'article_id': articleId,
-        'read_at': DateTime.now().toUtc().toIso8601String(),
-      },
-      onConflict: 'user_id,article_id',
-    );
+    await _client.from('awareness_user_actions').upsert({
+      'user_id': userId,
+      'article_id': articleId,
+      'read_at': DateTime.now().toUtc().toIso8601String(),
+    }, onConflict: 'user_id,article_id');
     _cache = _cache
         .map((item) => item.id == articleId ? item.copyWith(read: true) : item)
         .toList(growable: false);
@@ -308,16 +318,15 @@ class AwarenessFeedService {
     if (userId == null || articleId.isEmpty) {
       return;
     }
-    await _client.from('awareness_user_actions').upsert(
-      {
-        'user_id': userId,
-        'article_id': articleId,
-        'saved_at': saved ? DateTime.now().toUtc().toIso8601String() : null,
-      },
-      onConflict: 'user_id,article_id',
-    );
+    await _client.from('awareness_user_actions').upsert({
+      'user_id': userId,
+      'article_id': articleId,
+      'saved_at': saved ? DateTime.now().toUtc().toIso8601String() : null,
+    }, onConflict: 'user_id,article_id');
     _cache = _cache
-        .map((item) => item.id == articleId ? item.copyWith(saved: saved) : item)
+        .map(
+          (item) => item.id == articleId ? item.copyWith(saved: saved) : item,
+        )
         .toList(growable: false);
   }
 
@@ -379,7 +388,9 @@ class AwarenessFeedService {
     return result.refreshed;
   }
 
-  Future<_AwarenessRefreshResult> _invokeRefresh({required String action}) async {
+  Future<_AwarenessRefreshResult> _invokeRefresh({
+    required String action,
+  }) async {
     final token = _client.auth.currentSession?.accessToken;
     if (token == null || token.isEmpty) {
       throw const AwarenessFeedException('Please sign in again to continue.');
@@ -427,11 +438,18 @@ class AwarenessFeedService {
       if (!success && warning?.isNotEmpty == true && activeCount <= 0) {
         throw AwarenessFeedException(warning!);
       }
+      final lastSuccessfulAt = DateTime.tryParse(
+        decoded['lastSuccessAt']?.toString() ?? '',
+      );
+      if (lastSuccessfulAt != null) {
+        _lastSuccessfulRefreshAt = lastSuccessfulAt.toLocal();
+      }
       return _AwarenessRefreshResult(
         message: message,
         warning: warning?.isNotEmpty == true ? warning : null,
         activeCount: activeCount,
         refreshed: decoded['refreshed'] == true,
+        lastSuccessfulAt: lastSuccessfulAt,
       );
     }
     return const _AwarenessRefreshResult(
@@ -441,7 +459,11 @@ class AwarenessFeedService {
     );
   }
 
-  void dispose() => _http.close();
+  void dispose() {
+    _disposed = true;
+    _backgroundUpdates.close();
+    _http.close();
+  }
 }
 
 bool _isAiAwarenessArticle(AwarenessArticle article) {
@@ -463,10 +485,14 @@ bool _isAiAwarenessArticle(AwarenessArticle article) {
   if (RegExp(r'\bvoice clon(e|ed|ing)?\b|\bcloned voice\b').hasMatch(text)) {
     score += 7;
   }
-  if (RegExp(r'\bai[- ]generated\b|\bai[- ]made\b|\bai[- ]created\b').hasMatch(text)) {
+  if (RegExp(
+    r'\bai[- ]generated\b|\bai[- ]made\b|\bai[- ]created\b',
+  ).hasMatch(text)) {
     score += 6;
   }
-  if (RegExp(r'\bai[- ]powered\b|\bai[- ]driven\b|\bai[- ]assisted\b').hasMatch(text)) {
+  if (RegExp(
+    r'\bai[- ]powered\b|\bai[- ]driven\b|\bai[- ]assisted\b',
+  ).hasMatch(text)) {
     score += 5;
   }
   if (RegExp(r'(^|[^a-z0-9])ai([^a-z0-9]|$)').hasMatch(text)) {
@@ -486,12 +512,14 @@ class _AwarenessRefreshResult {
   final String? warning;
   final int activeCount;
   final bool refreshed;
+  final DateTime? lastSuccessfulAt;
 
   const _AwarenessRefreshResult({
     required this.message,
     required this.activeCount,
     required this.refreshed,
     this.warning,
+    this.lastSuccessfulAt,
   });
 }
 

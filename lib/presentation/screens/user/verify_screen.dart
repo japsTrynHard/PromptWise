@@ -6,6 +6,7 @@ import '../../../core/utils/constants.dart';
 import '../../../data/models/learning_progression.dart';
 import '../../../data/models/verification.dart';
 import '../../controllers/content_controller.dart';
+import '../../controllers/adaptive_learning_controller.dart';
 import '../../controllers/learning_progression_controller.dart';
 import '../../controllers/verification_controller.dart';
 import '../../widgets/adaptive_layout.dart';
@@ -56,7 +57,13 @@ class _VerifyScreenState extends State<VerifyScreen> {
     }
 
     await Navigator.pushNamed(context, AppRoutes.verificationSession);
-    if (context.mounted) await verification.refresh();
+    if (context.mounted) {
+      await Future.wait<void>([
+        verification.refresh(),
+        context.read<AdaptiveLearningController>().refreshFromCloud(),
+        progression.refresh(),
+      ]);
+    }
   }
 
   @override
@@ -69,7 +76,8 @@ class _VerifyScreenState extends State<VerifyScreen> {
       0,
       (sum, item) => sum + verification.masteryFor(item).attempts,
     );
-    final average = VerificationSubskill.values.fold<int>(
+    final average =
+        VerificationSubskill.values.fold<int>(
           0,
           (sum, item) => sum + verification.masteryFor(item).mastery,
         ) ~/
@@ -81,7 +89,12 @@ class _VerifyScreenState extends State<VerifyScreen> {
       safeBottom: false,
       child: RefreshIndicator(
         onRefresh: () async {
-          await Future.wait([content.refresh(), verification.refresh()]);
+          await Future.wait<void>([
+            content.refresh(),
+            verification.refresh(),
+            context.read<AdaptiveLearningController>().refreshFromCloud(),
+            context.read<LearningProgressionController>().refresh(),
+          ]);
         },
         child: CustomScrollView(
           physics: const AlwaysScrollableScrollPhysics(),
@@ -98,7 +111,8 @@ class _VerifyScreenState extends State<VerifyScreen> {
                   ),
                   const SizedBox(height: AppSpacing.xxl),
                   _ImageCompareFeature(
-                    onOpen: () => Navigator.pushNamed(context, AppRoutes.imageCompare),
+                    onOpen: () =>
+                        Navigator.pushNamed(context, AppRoutes.imageCompare),
                   ),
                   const SizedBox(height: AppSpacing.lg),
                   _QuickCheckFeature(
@@ -120,7 +134,8 @@ class _VerifyScreenState extends State<VerifyScreen> {
                   const SizedBox(height: AppSpacing.section),
                   const SectionHeader(
                     title: 'Skills you are building',
-                    subtitle: 'Simple habits that help you avoid misleading content.',
+                    subtitle:
+                        'Simple habits that help you avoid misleading content.',
                   ),
                   const SizedBox(height: AppSpacing.md),
                   _SkillChips(controller: verification),
@@ -133,18 +148,24 @@ class _VerifyScreenState extends State<VerifyScreen> {
                     actionLabel: awareness.isEmpty ? null : 'See all',
                     onAction: awareness.isEmpty
                         ? null
-                        : () => Navigator.pushNamed(context, AppRoutes.awareness),
+                        : () =>
+                              Navigator.pushNamed(context, AppRoutes.awareness),
                   ),
                   const SizedBox(height: AppSpacing.md),
                   if (awareness.isEmpty)
                     const StateMessage.empty(
                       title: 'No tips available yet',
-                      message: 'Published verification guides will appear here.',
+                      message:
+                          'Published verification guides will appear here.',
                     )
                   else
-                    ...awareness.take(3).map(
+                    ...awareness
+                        .take(3)
+                        .map(
                           (item) => Padding(
-                            padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+                            padding: const EdgeInsets.only(
+                              bottom: AppSpacing.sm,
+                            ),
                             child: AppCard(
                               onTap: () => Navigator.pushNamed(
                                 context,
@@ -182,7 +203,9 @@ class _ImageCompareFeature extends StatelessWidget {
     final theme = Theme.of(context);
     return AppCard(
       onTap: onOpen,
-      backgroundColor: theme.colorScheme.primaryContainer.withValues(alpha: 0.5),
+      backgroundColor: theme.colorScheme.primaryContainer.withValues(
+        alpha: 0.5,
+      ),
       child: LayoutBuilder(
         builder: (context, constraints) {
           final text = Column(
@@ -264,10 +287,7 @@ class _QuickCheckFeature extends StatelessWidget {
   final bool isStarting;
   final VoidCallback onStart;
 
-  const _QuickCheckFeature({
-    required this.isStarting,
-    required this.onStart,
-  });
+  const _QuickCheckFeature({required this.isStarting, required this.onStart});
 
   @override
   Widget build(BuildContext context) {
@@ -345,11 +365,17 @@ class _FriendlyProgressCard extends StatelessWidget {
             children: [
               Expanded(
                 child: Text(
-                  attempts == 0 ? 'You are just getting started' : '$average% overall progress',
-                  style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+                  attempts == 0
+                      ? 'You are just getting started'
+                      : '$average% overall progress',
+                  style: theme.textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
               ),
-              Text('$attempts practice ${attempts == 1 ? 'answer' : 'answers'}'),
+              Text(
+                '$attempts practice ${attempts == 1 ? 'answer' : 'answers'}',
+              ),
             ],
           ),
           const SizedBox(height: AppSpacing.md),
@@ -376,23 +402,27 @@ class _SkillChips extends StatelessWidget {
     return Wrap(
       spacing: AppSpacing.sm,
       runSpacing: AppSpacing.sm,
-      children: VerificationSubskill.values.map((skill) {
-        final progress = controller.masteryFor(skill);
-        return Tooltip(
-          message: skill.learnerDescription,
-          child: Chip(
-            avatar: Icon(
-              progress.attempts == 0 ? Icons.circle_outlined : Icons.check_circle_outline_rounded,
-              size: 18,
-            ),
-            label: Text(
-              progress.attempts == 0
-                  ? skill.learnerLabel
-                  : '${skill.learnerLabel} · ${progress.mastery}%',
-            ),
-          ),
-        );
-      }).toList(growable: false),
+      children: VerificationSubskill.values
+          .map((skill) {
+            final progress = controller.masteryFor(skill);
+            return Tooltip(
+              message: skill.learnerDescription,
+              child: Chip(
+                avatar: Icon(
+                  progress.attempts == 0
+                      ? Icons.circle_outlined
+                      : Icons.check_circle_outline_rounded,
+                  size: 18,
+                ),
+                label: Text(
+                  progress.attempts == 0
+                      ? skill.learnerLabel
+                      : '${skill.learnerLabel} · ${progress.mastery}%',
+                ),
+              ),
+            );
+          })
+          .toList(growable: false),
     );
   }
 }

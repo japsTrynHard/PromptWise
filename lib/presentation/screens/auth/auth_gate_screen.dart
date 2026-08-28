@@ -10,7 +10,6 @@ import '../../widgets/app_logo.dart';
 import '../admin/admin_dashboard_screen.dart';
 import '../user/dashboard_screen.dart';
 import '../shared/welcome_screen.dart';
-import './reset_password_screen.dart';
 
 class AuthGateScreen extends StatelessWidget {
   const AuthGateScreen({super.key});
@@ -32,10 +31,6 @@ class AuthGateScreen extends StatelessWidget {
           ),
         ),
       );
-    }
-
-    if (auth.isPasswordRecovery) {
-      return const ResetPasswordScreen();
     }
 
     if (!auth.isAuthenticated) return const WelcomeScreen();

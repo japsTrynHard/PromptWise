@@ -46,11 +46,9 @@ class ProfileScreen extends StatelessWidget {
                   name: auth.displayName,
                   email: auth.email,
                   role: auth.profile?.role.label ?? 'Learner',
-                  level: progress.knowledgeLevel,
                   completed: progress.completedLessons,
                   total: progress.totalLessons,
-                  quizScore: progressController.currentQuizScore,
-                  maximumQuizScore: progressController.maximumQuizScore,
+                  mastery: adaptive.overallMastery,
                 ),
                 const SizedBox(height: AppSpacing.section),
                 Text(
@@ -303,21 +301,17 @@ class _ProfileHeader extends StatelessWidget {
   final String name;
   final String email;
   final String role;
-  final String level;
   final int completed;
   final int total;
-  final int quizScore;
-  final int maximumQuizScore;
+  final int mastery;
 
   const _ProfileHeader({
     required this.name,
     required this.email,
     required this.role,
-    required this.level,
     required this.completed,
     required this.total,
-    required this.quizScore,
-    required this.maximumQuizScore,
+    required this.mastery,
   });
 
   @override
@@ -348,7 +342,7 @@ class _ProfileHeader extends StatelessWidget {
                     const SizedBox(height: AppSpacing.xs),
                     Text(email, style: Theme.of(context).textTheme.bodyMedium),
                     Text(
-                      '$role · $level knowledge level',
+                      role,
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: Theme.of(context).colorScheme.onSurfaceVariant,
                       ),
@@ -377,10 +371,7 @@ class _ProfileHeader extends StatelessWidget {
                 child: _Stat(value: '$completed/$total', label: 'Lessons'),
               ),
               Expanded(
-                child: _Stat(
-                  value: '$quizScore/$maximumQuizScore',
-                  label: 'Quiz points',
-                ),
+                child: _Stat(value: '$mastery%', label: 'Mastery'),
               ),
               Expanded(
                 child: _Stat(

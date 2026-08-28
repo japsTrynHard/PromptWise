@@ -272,6 +272,7 @@ Deno.serve(async (req) => {
             : 'Awareness check completed with current trusted articles.',
         refreshed: true,
         success: true,
+        lastSuccessAt: completedAt,
         ...result,
       });
     } catch (refreshError) {
