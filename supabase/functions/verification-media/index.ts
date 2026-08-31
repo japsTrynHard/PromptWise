@@ -196,7 +196,7 @@ Deno.serve(async (req) => {
     await recordRoundAssignments(client, userId, rounds);
 
     const challengeRounds = rounds.map((round) =>
-      toChallengePayload(round, supabaseUrl)
+      toChallengePayload(round, supabaseUrl),
     );
 
     return json({
@@ -340,29 +340,34 @@ async function recordRoundAssignments(
 ): Promise<void> {
   const servedAt = new Date();
   const expiresAt = new Date(servedAt.getTime() + 60 * 60 * 1000);
-  const payload = rounds.map((round) => {
-    const imageA = asRecord(round.image_a);
-    const imageB = asRecord(round.image_b);
-    const correctSide = String(round.correct_side ?? "").trim().toUpperCase();
-    const correctSource = correctSide === "A" ? imageA : imageB;
-    return {
-      user_id: userId,
-      round_id: String(round.id ?? "").trim(),
-      correct_side: correctSide,
-      explanation: String(round.explanation ?? "").trim(),
-      correct_source: toFeedbackPayload(correctSource),
-      image_a_url: String(imageA.image_url ?? "").trim(),
-      image_b_url: String(imageB.image_url ?? "").trim(),
-      served_at: servedAt.toISOString(),
-      expires_at: expiresAt.toISOString(),
-    };
-  }).filter((round) =>
-    round.round_id &&
-    (round.correct_side === "A" || round.correct_side === "B") &&
-    round.explanation &&
-    round.image_a_url &&
-    round.image_b_url
-  );
+  const payload = rounds
+    .map((round) => {
+      const imageA = asRecord(round.image_a);
+      const imageB = asRecord(round.image_b);
+      const correctSide = String(round.correct_side ?? "")
+        .trim()
+        .toUpperCase();
+      const correctSource = correctSide === "A" ? imageA : imageB;
+      return {
+        user_id: userId,
+        round_id: String(round.id ?? "").trim(),
+        correct_side: correctSide,
+        explanation: String(round.explanation ?? "").trim(),
+        correct_source: toFeedbackPayload(correctSource),
+        image_a_url: String(imageA.image_url ?? "").trim(),
+        image_b_url: String(imageB.image_url ?? "").trim(),
+        served_at: servedAt.toISOString(),
+        expires_at: expiresAt.toISOString(),
+      };
+    })
+    .filter(
+      (round) =>
+        round.round_id &&
+        (round.correct_side === "A" || round.correct_side === "B") &&
+        round.explanation &&
+        round.image_a_url &&
+        round.image_b_url,
+    );
 
   if (payload.length !== rounds.length) {
     throw new HttpError(503, "Image round assignments were incomplete.");
@@ -417,7 +422,8 @@ async function proxyRoundImage(req: Request): Promise<Response> {
   try {
     const requestUrl = new URL(req.url);
     const roundId = requestUrl.searchParams.get("round_id")?.trim() ?? "";
-    const side = requestUrl.searchParams.get("side")?.trim().toUpperCase() ?? "";
+    const side =
+      requestUrl.searchParams.get("side")?.trim().toUpperCase() ?? "";
     if (!roundId || (side !== "A" && side !== "B")) {
       throw new HttpError(400, "Image request is invalid.");
     }
@@ -442,13 +448,11 @@ async function proxyRoundImage(req: Request): Promise<Response> {
     const rawImageUrl = String(
       side === "A" ? data.image_a_url : data.image_b_url,
     ).trim();
-    const imageUrl = new URL(rawImageUrl);
-    if (
-      imageUrl.protocol !== "https:" ||
-      imageUrl.hostname !== "upload.wikimedia.org"
-    ) {
+    const normalizedImageUrl = normalizeAllowedCommonsImageUrl(rawImageUrl);
+    if (!normalizedImageUrl) {
       throw new HttpError(502, "Stored image source is invalid.");
     }
+    const imageUrl = new URL(normalizedImageUrl);
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 12_000);
@@ -475,7 +479,8 @@ async function proxyRoundImage(req: Request): Promise<Response> {
     });
   } catch (error) {
     const status = error instanceof HttpError ? error.status : 502;
-    if (status >= 500) console.error("Image proxy failed:", errorMessage(error));
+    if (status >= 500)
+      console.error("Image proxy failed:", errorMessage(error));
     return json({ message: errorMessage(error) }, status);
   }
 }
@@ -604,7 +609,9 @@ async function searchCommonsQuery({
       continue;
     }
 
-    const imageUrl = String(info.thumburl ?? info.url ?? "").trim();
+    const rawImageUrl = String(info.thumburl ?? info.url ?? "").trim();
+
+    const imageUrl = normalizeAllowedCommonsImageUrl(rawImageUrl);
 
     const sourcePageUrl = String(info.descriptionurl ?? "").trim();
 
@@ -798,6 +805,33 @@ function toPayload(image: CommonsImage): JsonRecord {
 
     labeled_ai_generated: image.labeledAiGenerated,
   };
+}
+
+function normalizeAllowedCommonsImageUrl(value: string): string | null {
+  const raw = value.trim();
+
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    const parsed = new URL(raw);
+
+    if (
+      parsed.protocol !== "https:" ||
+      parsed.hostname !== "upload.wikimedia.org" ||
+      parsed.username ||
+      parsed.password
+    ) {
+      return null;
+    }
+
+    // Canonicalize the trusted host/protocol before storing the URL so it
+    // also satisfies verification_media_rounds_image_urls_check.
+    return parsed.toString();
+  } catch {
+    return null;
+  }
 }
 
 function cleanTitle(value: string): string {
