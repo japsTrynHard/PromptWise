@@ -5,11 +5,12 @@ import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../data/models/app_profile.dart';
-import '../../data/models/auth_otp_request.dart';
 import '../../data/repositories/auth_repository.dart';
 import '../../data/services/storage_service.dart';
 
 class AuthController extends ChangeNotifier {
+  static const _pendingSignupEmailKey = 'pendingSignupEmailV1';
+
   final AuthGateway? _repository;
   final StorageService _storage;
 
@@ -27,8 +28,9 @@ class AuthController extends ChangeNotifier {
   bool _isProfileLoading = false;
   bool _isPasswordRecovery = false;
   bool _profileRoleAuthoritative = false;
+  bool _isDisposed = false;
+  bool _hasPendingSignupConfirmation = false;
   String? _pendingEmail;
-  AuthOtpPurpose? _pendingOtpPurpose;
   String? _errorMessage;
   List<AppProfile>? _allProfilesCache;
   DateTime? _allProfilesCacheAt;
@@ -52,7 +54,9 @@ class AuthController extends ChangeNotifier {
           (!_isProfileLoading && _profile != null));
   String? get errorMessage => _errorMessage;
   String? get pendingEmail => _pendingEmail;
-  AuthOtpPurpose? get pendingOtpPurpose => _pendingOtpPurpose;
+  bool get hasPendingSignupVerification =>
+      _hasPendingSignupConfirmation &&
+      (_pendingEmail?.isNotEmpty ?? false);
   Session? get session => _session;
   User? get user => _session?.user;
   AppProfile? get profile => _profile;
@@ -76,12 +80,25 @@ class AuthController extends ChangeNotifier {
     final repository = _repository;
     if (repository == null) {
       _isInitialized = true;
-      notifyListeners();
+      _notifyListeners();
       return;
     }
 
+    await _restorePendingSignupEmail();
     _session = repository.currentSession;
-    _pendingEmail = _session?.user.email;
+    final restoredUser = _session?.user;
+    if (restoredUser != null) {
+      _pendingEmail = restoredUser.email ?? _pendingEmail;
+      if (restoredUser.emailConfirmedAt != null) {
+        _hasPendingSignupConfirmation = false;
+        await _clearPendingSignupEmail();
+      } else {
+        _hasPendingSignupConfirmation = true;
+        await _persistPendingSignupEmail(
+          restoredUser.email ?? _pendingEmail ?? '',
+        );
+      }
+    }
 
     // Subscribe before profile hydration so auth changes are never missed while
     // a returning device is restoring its local account state.
@@ -89,7 +106,7 @@ class AuthController extends ChangeNotifier {
       handleAuthState,
       onError: (Object error, StackTrace stackTrace) {
         _errorMessage = _friendlyMessage(error);
-        notifyListeners();
+        _notifyListeners();
       },
     );
 
@@ -101,7 +118,7 @@ class AuthController extends ChangeNotifier {
     }
 
     _isInitialized = true;
-    notifyListeners();
+    _notifyListeners();
   }
 
   @visibleForTesting
@@ -112,7 +129,6 @@ class AuthController extends ChangeNotifier {
 
     if (state.event == AuthChangeEvent.passwordRecovery) {
       _isPasswordRecovery = true;
-      _pendingOtpPurpose = null;
     }
 
     if (state.event == AuthChangeEvent.signedOut || state.session == null) {
@@ -125,9 +141,10 @@ class AuthController extends ChangeNotifier {
       _allProfilesCacheAt = null;
       if (state.event == AuthChangeEvent.signedOut) {
         _isPasswordRecovery = false;
-        _pendingOtpPurpose = null;
+        _hasPendingSignupConfirmation = false;
+        unawaited(_clearPendingSignupEmail());
       }
-      notifyListeners();
+      _notifyListeners();
       return;
     }
 
@@ -137,7 +154,15 @@ class AuthController extends ChangeNotifier {
     }
 
     _pendingEmail = state.session?.user.email ?? _pendingEmail;
-    notifyListeners();
+    if (state.session?.user.emailConfirmedAt != null) {
+      _hasPendingSignupConfirmation = false;
+      unawaited(_clearPendingSignupEmail());
+    } else {
+      _hasPendingSignupConfirmation = true;
+      final email = state.session?.user.email;
+      if (email != null) unawaited(_persistPendingSignupEmail(email));
+    }
+    _notifyListeners();
 
     if (nextUserId != null && _profile?.id != nextUserId) {
       unawaited(_loadProfileOnce(nextUserId));
@@ -153,18 +178,26 @@ class AuthController extends ChangeNotifier {
     if (repository == null) return _configurationError();
 
     _pendingEmail = email.trim();
-    _pendingOtpPurpose = AuthOtpPurpose.signup;
+    _hasPendingSignupConfirmation = true;
     return _run(() async {
       final response = await repository.signUp(
         fullName: fullName,
         email: email,
         password: password,
       );
+      if (_isDisposed) return;
+      if (response.user == null) {
+        throw const AuthException('The signup request returned no account.');
+      }
       _pendingEmail = email.trim();
       _session = response.session;
-      if (response.session?.user != null) {
+      if (response.session?.user.emailConfirmedAt != null) {
+        _hasPendingSignupConfirmation = false;
+        await _clearPendingSignupEmail();
         await _loadProfileOnce(response.session!.user.id);
-        _pendingOtpPurpose = null;
+      } else {
+        _hasPendingSignupConfirmation = true;
+        await _persistPendingSignupEmail(_pendingEmail!);
       }
     });
   }
@@ -179,13 +212,15 @@ class AuthController extends ChangeNotifier {
         email: email,
         password: password,
       );
+      if (_isDisposed) return;
       _pendingEmail = email.trim();
       _session = response.session;
       final signedInUser = response.user;
       if (signedInUser == null || response.session == null) {
         throw AuthException('No active session was created.');
       }
-      _pendingOtpPurpose = null;
+      _hasPendingSignupConfirmation = false;
+      await _clearPendingSignupEmail();
       await _loadProfileOnce(signedInUser.id);
     });
   }
@@ -197,83 +232,84 @@ class AuthController extends ChangeNotifier {
     final targetEmail = email.trim();
     if (targetEmail.isEmpty) {
       _errorMessage = 'Enter your registered email address.';
-      notifyListeners();
+      _notifyListeners();
       return false;
     }
 
     _pendingEmail = targetEmail;
-    _pendingOtpPurpose = AuthOtpPurpose.signIn;
     return _run(() async {
       await repository.sendSignInOtp(targetEmail);
     });
   }
 
-  Future<bool> verifyOtp({
+  Future<bool> verifySignInOtp({
     required String email,
     required String token,
-    required AuthOtpPurpose purpose,
   }) async {
     final repository = _repository;
     if (repository == null) return _configurationError();
 
     final normalizedEmail = email.trim();
     final normalizedToken = token.replaceAll(RegExp(r'\s+'), '');
-    if (normalizedToken.length != 6) {
+    if (normalizedEmail.isEmpty) {
+      _errorMessage = 'Enter the email address that received the code.';
+      _notifyListeners();
+      return false;
+    }
+    if (!RegExp(r'^\d{6}$').hasMatch(normalizedToken)) {
       _errorMessage = 'Enter the complete 6-digit code.';
-      notifyListeners();
+      _notifyListeners();
       return false;
     }
 
     _pendingEmail = normalizedEmail;
-    _pendingOtpPurpose = purpose;
     return _run(() async {
       final response = await repository.verifyEmailOtp(
         email: normalizedEmail,
         token: normalizedToken,
-        purpose: purpose,
       );
+      if (_isDisposed) return;
       _session = response.session;
 
       if (response.user == null || response.session == null) {
         throw AuthException('The code could not create an active session.');
       }
 
-      _pendingOtpPurpose = null;
+      _hasPendingSignupConfirmation = false;
+      await _clearPendingSignupEmail();
       await _loadProfileOnce(response.user!.id);
     });
   }
 
-  Future<bool> resendOtp({
-    required String email,
-    required AuthOtpPurpose purpose,
-  }) async {
+  Future<bool> resendSignupConfirmation({String? email}) async {
     final repository = _repository;
     if (repository == null) return _configurationError();
 
-    final targetEmail = email.trim();
+    final targetEmail = (email ?? _pendingEmail ?? user?.email ?? '').trim();
     if (targetEmail.isEmpty) {
-      _errorMessage = 'Enter the email address used for the request.';
-      notifyListeners();
+      _errorMessage = 'Enter the email address used to create the account.';
+      _notifyListeners();
       return false;
     }
 
     _pendingEmail = targetEmail;
-    _pendingOtpPurpose = purpose;
+    _hasPendingSignupConfirmation = true;
     return _run(() async {
-      switch (purpose) {
-        case AuthOtpPurpose.signup:
-          await repository.resendSignupConfirmation(targetEmail);
-          break;
-        case AuthOtpPurpose.signIn:
-          await repository.sendSignInOtp(targetEmail);
-          break;
-      }
+      await repository.resendSignupConfirmation(targetEmail);
+      if (_isDisposed) return;
+      await _persistPendingSignupEmail(targetEmail);
     });
   }
 
   Future<bool> resendVerification({String? email}) async {
-    final targetEmail = (email ?? _pendingEmail ?? user?.email ?? '').trim();
-    return resendOtp(email: targetEmail, purpose: AuthOtpPurpose.signup);
+    return resendSignupConfirmation(email: email);
+  }
+
+  Future<void> clearPendingSignupConfirmation() async {
+    _hasPendingSignupConfirmation = false;
+    _errorMessage = null;
+    await _clearPendingSignupEmail();
+    _notifyListeners();
   }
 
   Future<bool> sendPasswordReset(String email) async {
@@ -282,7 +318,6 @@ class AuthController extends ChangeNotifier {
 
     final targetEmail = email.trim();
     _pendingEmail = targetEmail;
-    _pendingOtpPurpose = null;
     return _run(() async {
       await repository.sendPasswordReset(targetEmail);
     });
@@ -349,22 +384,22 @@ class AuthController extends ChangeNotifier {
       _allProfilesCache = null;
       _allProfilesCacheAt = null;
       _isPasswordRecovery = false;
-      _pendingOtpPurpose = null;
+      _hasPendingSignupConfirmation = false;
+      await _clearPendingSignupEmail();
     });
   }
 
   void clearError() {
     if (_errorMessage == null) return;
     _errorMessage = null;
-    notifyListeners();
+    _notifyListeners();
   }
 
   void completePasswordRecovery() {
     if (!_isPasswordRecovery) return;
     _isPasswordRecovery = false;
-    _pendingOtpPurpose = null;
     _errorMessage = null;
-    notifyListeners();
+    _notifyListeners();
   }
 
   Future<void> _loadProfileOnce(String userId) {
@@ -377,7 +412,7 @@ class AuthController extends ChangeNotifier {
 
     _profileLoadUserId = userId;
     _isProfileLoading = true;
-    notifyListeners();
+    _notifyListeners();
 
     final future = _loadProfileCacheFirst(userId);
     _profileLoadFuture = future;
@@ -388,7 +423,7 @@ class AuthController extends ChangeNotifier {
       _profileLoadUserId = null;
       if (_session?.user.id == userId) {
         _isProfileLoading = false;
-        notifyListeners();
+        _notifyListeners();
       }
     });
   }
@@ -413,7 +448,7 @@ class AuthController extends ChangeNotifier {
       );
       _profileRoleAuthoritative = false;
       _isProfileLoading = false;
-      notifyListeners();
+      _notifyListeners();
 
       // Do not make a returning learner stare at a loading screen while a
       // network round trip refreshes information that is already safe to show.
@@ -441,7 +476,7 @@ class AuthController extends ChangeNotifier {
       _profile = loaded ?? _fallbackProfile(userId);
       _profileRoleAuthoritative = loaded != null;
       await _saveProfileCache(_profile!);
-      notifyListeners();
+      _notifyListeners();
     } catch (error, stackTrace) {
       _debugFailure('Profile refresh', error, stackTrace);
       if (_session?.user.id != userId) return;
@@ -457,7 +492,7 @@ class AuthController extends ChangeNotifier {
             ? 'You appear to be offline. Using saved account information until the connection returns.'
             : 'Account information could not be refreshed. Saved learner access is being used; administrator access requires a successful server check.';
       }
-      notifyListeners();
+      _notifyListeners();
     }
   }
 
@@ -508,27 +543,29 @@ class AuthController extends ChangeNotifier {
   }
 
   Future<bool> _run(Future<void> Function() operation) async {
-    if (_isLoading) return false;
+    if (_isLoading || _isDisposed) return false;
     _isLoading = true;
     _errorMessage = null;
-    notifyListeners();
+    _notifyListeners();
 
     try {
       await operation();
+      if (_isDisposed) return false;
       return true;
     } catch (error, stackTrace) {
       _debugFailure('Authentication request', error, stackTrace);
+      if (_isDisposed) return false;
       _errorMessage = _friendlyMessage(error);
       return false;
     } finally {
       _isLoading = false;
-      notifyListeners();
+      _notifyListeners();
     }
   }
 
   bool _configurationError() {
     _errorMessage = 'Sign in is not available in this build.';
-    notifyListeners();
+    _notifyListeners();
     return false;
   }
 
@@ -546,14 +583,22 @@ class AuthController extends ChangeNotifier {
   }
 
   String _friendlyMessage(Object error) {
+    if (_isConnectionFailure(error)) {
+      return 'The verification service could not be reached. Check your connection and try again.';
+    }
     if (error is AuthException) {
       final message = error.message.trim();
       final lower = message.toLowerCase();
+      final code = error.code?.toLowerCase();
       if (lower.contains('invalid login credentials')) {
         return 'The email or password is incorrect.';
       }
       if (lower.contains('email not confirmed')) {
-        return 'Confirm your email before signing in.';
+        return 'Verify your email using the confirmation link we sent before signing in.';
+      }
+      if (lower.contains('already confirmed') ||
+          lower.contains('already been confirmed')) {
+        return 'This email is already verified. Sign in to continue.';
       }
       if (lower.contains('user already registered')) {
         return 'An account already exists for this email.';
@@ -561,13 +606,23 @@ class AuthController extends ChangeNotifier {
       if (lower.contains('email address not authorized')) {
         return 'Email delivery is not available for this address right now. Please try again later.';
       }
-      if (lower.contains('rate limit') || lower.contains('too many requests')) {
+      if (code == 'over_email_send_rate_limit' ||
+          code == 'over_request_rate_limit' ||
+          lower.contains('rate limit') ||
+          lower.contains('too many requests')) {
         return 'Too many email requests were sent. Please wait a while before trying again.';
       }
-      if (lower.contains('token has expired') ||
+      if (code == 'otp_expired' ||
+          lower.contains('token has expired') ||
           lower.contains('otp_expired') ||
-          lower.contains('invalid token')) {
-        return 'The email link or code is invalid or expired. Request a new one and use only the latest email.';
+          lower.contains('already used')) {
+        return 'This verification code has expired or was already used. Request a new code and use only the latest email.';
+      }
+      if (lower.contains('invalid token') ||
+          lower.contains('invalid otp') ||
+          lower.contains('token is invalid') ||
+          lower.contains('code is invalid')) {
+        return 'That verification code is incorrect. Check the 6 digits and try again.';
       }
       if (lower.contains('user not found') ||
           lower.contains('signups not allowed')) {
@@ -585,8 +640,45 @@ class AuthController extends ChangeNotifier {
     return 'The request could not be completed. Check your connection and try again.';
   }
 
+  Future<void> _restorePendingSignupEmail() async {
+    try {
+      await _storage.init();
+      final email = _storage.getString(_pendingSignupEmailKey).trim();
+      if (email.isEmpty) return;
+      _pendingEmail = email;
+      _hasPendingSignupConfirmation = true;
+    } catch (error, stackTrace) {
+      _debugFailure('Pending signup restore', error, stackTrace);
+    }
+  }
+
+  Future<void> _persistPendingSignupEmail(String email) async {
+    final normalizedEmail = email.trim();
+    if (normalizedEmail.isEmpty) return;
+    _pendingEmail = normalizedEmail;
+    _hasPendingSignupConfirmation = true;
+    try {
+      await _storage.setString(_pendingSignupEmailKey, normalizedEmail);
+    } catch (error, stackTrace) {
+      _debugFailure('Pending signup save', error, stackTrace);
+    }
+  }
+
+  Future<void> _clearPendingSignupEmail() async {
+    try {
+      await _storage.remove(_pendingSignupEmailKey);
+    } catch (error, stackTrace) {
+      _debugFailure('Pending signup clear', error, stackTrace);
+    }
+  }
+
+  void _notifyListeners() {
+    if (!_isDisposed) notifyListeners();
+  }
+
   @override
   void dispose() {
+    _isDisposed = true;
     _authSubscription?.cancel();
     super.dispose();
   }

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:promptwise/data/models/dictionary_entry.dart';
@@ -74,6 +75,45 @@ void main() {
       controller.dispose();
     },
   );
+
+  test('retry starts a clean request after a failed lookup', () async {
+    final service = _RetryDictionaryService();
+    final controller = DictionaryController(service: service);
+
+    await controller.lookup('prompt', forceOnline: true);
+    expect(controller.isLoading, isFalse);
+    expect(controller.entry, isNull);
+    expect(service.calls, 1);
+
+    final retry = controller.retry();
+    expect(controller.isLoading, isTrue);
+    expect(service.calls, 2);
+    await retry;
+
+    expect(controller.isLoading, isFalse);
+    expect(controller.entry?.word, 'prompt');
+    controller.dispose();
+  });
+
+  test('successful-definition cache keeps the newest 75 LRU entries', () async {
+    final controller = DictionaryController(
+      service: _ImmediateDictionaryService(),
+    );
+
+    for (var index = 0; index < 76; index++) {
+      await controller.lookup('word$index', forceOnline: true);
+    }
+
+    final preferences = await SharedPreferences.getInstance();
+    final encoded = preferences.getString('lessonDictionaryCacheV2');
+    expect(encoded, isNotNull);
+    final cache = Map<String, dynamic>.from(jsonDecode(encoded!) as Map);
+    expect(cache, hasLength(75));
+    expect(cache.containsKey('word0'), isFalse);
+    expect(cache.containsKey('word1'), isTrue);
+    expect(cache.containsKey('word75'), isTrue);
+    controller.dispose();
+  });
 }
 
 DictionaryEntry _entry(String word) => DictionaryEntry(
@@ -106,4 +146,27 @@ class _FakeDictionaryService implements DictionaryLookupService {
   void fail(String word, Object error) {
     _pending[word]!.completeError(error);
   }
+}
+
+class _RetryDictionaryService implements DictionaryLookupService {
+  int calls = 0;
+
+  @override
+  Future<DictionaryEntry> lookup(String word) {
+    calls++;
+    if (calls == 1) {
+      return Future<DictionaryEntry>.error(
+        const DictionaryServiceException(
+          'The dictionary providers are temporarily unavailable.',
+          kind: DictionaryFailureKind.upstream,
+        ),
+      );
+    }
+    return Future<DictionaryEntry>.value(_entry(word));
+  }
+}
+
+class _ImmediateDictionaryService implements DictionaryLookupService {
+  @override
+  Future<DictionaryEntry> lookup(String word) async => _entry(word);
 }

@@ -3,13 +3,13 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../controllers/auth_controller.dart';
-import '../../../data/models/auth_otp_request.dart';
 import '../../../core/routes/app_routes.dart';
 import '../../../core/utils/constants.dart';
 import '../../widgets/app_logo.dart';
 import '../admin/admin_dashboard_screen.dart';
 import '../user/dashboard_screen.dart';
 import '../shared/welcome_screen.dart';
+import 'signup_confirmation_screen.dart';
 
 class AuthGateScreen extends StatelessWidget {
   const AuthGateScreen({super.key});
@@ -33,28 +33,15 @@ class AuthGateScreen extends StatelessWidget {
       );
     }
 
-    if (!auth.isAuthenticated) return const WelcomeScreen();
+    if (!auth.isAuthenticated) {
+      if (auth.hasPendingSignupVerification) {
+        return SignupConfirmationScreen(email: auth.pendingEmail!);
+      }
+      return const WelcomeScreen();
+    }
 
     if (!auth.isEmailVerified) {
-      return _GateMessage(
-        icon: Icons.mark_email_unread_outlined,
-        title: 'Confirm your email',
-        message:
-            'Open the confirmation link sent to ${auth.email}. After confirmation, return to PromptWise.',
-        primaryLabel: 'Enter confirmation code',
-        onPrimary: auth.isLoading
-            ? null
-            : () => Navigator.pushNamed(
-                context,
-                AppRoutes.verifyEmail,
-                arguments: AuthOtpRequest(
-                  email: auth.email,
-                  purpose: AuthOtpPurpose.signup,
-                ),
-              ),
-        secondaryLabel: 'Sign out',
-        onSecondary: auth.isLoading ? null : () => auth.signOut(),
-      );
+      return SignupConfirmationScreen(email: auth.email);
     }
 
     if (!auth.isReadyForRouting) {

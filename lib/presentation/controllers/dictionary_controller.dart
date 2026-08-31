@@ -15,7 +15,7 @@ class DictionaryController extends ChangeNotifier {
        _storage = storage ?? StorageService();
 
   static const _cacheKey = 'lessonDictionaryCacheV2';
-  static const _cacheLimit = 12;
+  static const _cacheLimit = 75;
 
   final DictionaryLookupService _service;
   final StorageService _storage;

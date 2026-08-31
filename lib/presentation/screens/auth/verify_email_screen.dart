@@ -40,10 +40,7 @@ class _VerifyEmailScreenState extends State<VerifyEmailScreen> {
 
   AuthOtpRequest _request(AuthController auth) {
     return widget.request ??
-        AuthOtpRequest(
-          email: auth.pendingEmail ?? auth.email,
-          purpose: auth.pendingOtpPurpose ?? AuthOtpPurpose.signup,
-        );
+        AuthOtpRequest(email: auth.pendingEmail ?? auth.email);
   }
 
   void _startCooldown({bool notify = true}) {
@@ -68,29 +65,31 @@ class _VerifyEmailScreenState extends State<VerifyEmailScreen> {
     if (!_formKey.currentState!.validate()) return;
     final auth = context.read<AuthController>();
     final request = _request(auth);
-    final success = await auth.verifyOtp(
+    final success = await auth.verifySignInOtp(
       email: request.email,
       token: _codeController.text,
-      purpose: request.purpose,
     );
     if (!mounted || !success) return;
 
-    // Signup verification and passwordless sign-in legitimately use codes.
-    // Password recovery is handled only by Supabase's recovery link event.
+    // Passwordless sign-in legitimately uses a code. Signup confirmation and
+    // password recovery are handled by their separate Supabase link flows.
     Navigator.pushNamedAndRemoveUntil(context, AppRoutes.root, (_) => false);
   }
 
   Future<void> _resend() async {
     final auth = context.read<AuthController>();
     final request = _request(auth);
-    final success = await auth.resendOtp(
-      email: request.email,
-      purpose: request.purpose,
-    );
+    final success = await auth.sendSignInOtp(request.email);
     if (!mounted || !success) return;
     _codeController.clear();
     setState(() => _resent = true);
     _startCooldown();
+  }
+
+  Future<void> _useDifferentEmail() async {
+    final auth = context.read<AuthController>();
+    auth.clearError();
+    Navigator.pushNamedAndRemoveUntil(context, AppRoutes.login, (_) => false);
   }
 
   @override
@@ -99,16 +98,10 @@ class _VerifyEmailScreenState extends State<VerifyEmailScreen> {
     final request = _request(auth);
 
     return AuthShell(
-      title: request.purpose.title,
-      description: request.purpose.description,
+      title: 'Enter your sign-in code',
+      description: 'Enter the 6-digit code sent to your email to sign in.',
       footer: TextButton(
-        onPressed: auth.isLoading
-            ? null
-            : () => Navigator.pushNamedAndRemoveUntil(
-                context,
-                AppRoutes.login,
-                (_) => false,
-              ),
+        onPressed: auth.isLoading ? null : _useDifferentEmail,
         child: const Text('Use a different email'),
       ),
       child: Form(
@@ -178,7 +171,7 @@ class _VerifyEmailScreenState extends State<VerifyEmailScreen> {
                     )
                   : const Icon(Icons.verified_outlined),
               label: Text(
-                auth.isLoading ? 'Verifying...' : request.purpose.actionLabel,
+                auth.isLoading ? 'Verifying...' : 'Sign in',
               ),
             ),
             const SizedBox(height: 8),

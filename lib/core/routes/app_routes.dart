@@ -15,6 +15,7 @@ import '../../presentation/screens/auth/forgot_password_screen.dart';
 import '../../presentation/screens/auth/login_screen.dart';
 import '../../presentation/screens/auth/register_screen.dart';
 import '../../presentation/screens/auth/reset_password_screen.dart';
+import '../../presentation/screens/auth/signup_confirmation_screen.dart';
 import '../../presentation/screens/auth/verify_email_screen.dart';
 import '../../presentation/screens/user/dashboard_screen.dart';
 import '../../presentation/screens/user/diagnostic_assessment_screen.dart';
@@ -35,6 +36,7 @@ class AppRoutes {
   static const String welcome = '/welcome';
   static const String login = '/login';
   static const String register = '/register';
+  static const String confirmEmail = '/confirm-email';
   static const String verifyEmail = '/verify-email';
   static const String forgotPassword = '/forgot-password';
   static const String resetPassword = '/reset-password';
@@ -62,6 +64,12 @@ class AppRoutes {
         return _page(settings, const LoginScreen());
       case register:
         return _page(settings, const RegisterScreen());
+      case confirmEmail:
+        final value = settings.arguments;
+        return _page(
+          settings,
+          SignupConfirmationScreen(email: value is String ? value : ''),
+        );
       case verifyEmail:
         final value = settings.arguments;
         return _page(

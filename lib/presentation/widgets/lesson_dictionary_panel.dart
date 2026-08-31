@@ -337,7 +337,7 @@ class _DefinitionResult extends StatelessWidget {
               ),
             ),
         Text(
-          'Source: Free Dictionary',
+          'Sources: Free Dictionary API and Wiktionary',
           style: Theme.of(
             context,
           ).textTheme.labelSmall?.copyWith(color: scheme.onSurfaceVariant),

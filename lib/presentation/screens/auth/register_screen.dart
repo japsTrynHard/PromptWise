@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../controllers/auth_controller.dart';
-import '../../../data/models/auth_otp_request.dart';
 import '../../../core/routes/app_routes.dart';
 import '../../widgets/auth_shell.dart';
 
@@ -51,11 +50,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
     Navigator.pushReplacementNamed(
       context,
-      AppRoutes.verifyEmail,
-      arguments: AuthOtpRequest(
-        email: _emailController.text.trim(),
-        purpose: AuthOtpPurpose.signup,
-      ),
+      AppRoutes.confirmEmail,
+      arguments: _emailController.text.trim(),
     );
   }
 

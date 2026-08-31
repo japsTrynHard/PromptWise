@@ -33,7 +33,7 @@ void main() {
 
       expect(success, isTrue);
       expect(gateway.lastResetEmail, 'learner@example.com');
-      expect(auth.pendingOtpPurpose, isNull);
+      expect(auth.hasPendingSignupVerification, isFalse);
       expect(auth.isPasswordRecovery, isFalse);
     },
   );
@@ -44,7 +44,7 @@ void main() {
     );
 
     expect(auth.isPasswordRecovery, isTrue);
-    expect(auth.pendingOtpPurpose, isNull);
+    expect(auth.hasPendingSignupVerification, isFalse);
   });
 
   testWidgets('forgot password confirms that a reset link was sent', (

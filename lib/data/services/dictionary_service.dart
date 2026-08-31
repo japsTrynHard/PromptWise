@@ -28,7 +28,7 @@ class DictionaryService implements DictionaryLookupService {
     try {
       response = await _client.functions
           .invoke('dictionary-lookup', body: {'word': cleaned})
-          .timeout(const Duration(seconds: 15));
+          .timeout(const Duration(seconds: 12));
     } on TimeoutException {
       throw const DictionaryServiceException(
         'The connection is taking too long. Please try again.',
@@ -86,12 +86,32 @@ class DictionaryService implements DictionaryLookupService {
         kind: DictionaryFailureKind.timeout,
       );
     }
+    if (code == 'network_failure') {
+      throw const DictionaryServiceException(
+        'The dictionary providers could not be reached. Please try again.',
+        kind: DictionaryFailureKind.network,
+      );
+    }
+    if (code == 'malformed_response' || code == 'invalid_response') {
+      throw const DictionaryServiceException(
+        'The dictionary providers returned unreadable results. Please try again.',
+        kind: DictionaryFailureKind.invalidResponse,
+      );
+    }
+    if (status == 400 || code == 'invalid_request') {
+      throw DictionaryServiceException(
+        message?.isNotEmpty == true
+            ? message!
+            : 'Enter one short word from the lesson.',
+        kind: DictionaryFailureKind.invalidRequest,
+      );
+    }
     throw DictionaryServiceException(
       message?.isNotEmpty == true
           ? message!
           : 'The dictionary is temporarily unavailable. Please try again.',
-      kind: code == 'invalid_response'
-          ? DictionaryFailureKind.invalidResponse
+      kind: code == 'server_error'
+          ? DictionaryFailureKind.unknown
           : DictionaryFailureKind.upstream,
     );
   }

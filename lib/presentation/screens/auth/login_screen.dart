@@ -40,7 +40,7 @@ class _LoginScreenState extends State<LoginScreen> {
       Navigator.pushNamed(
         context,
         AppRoutes.verifyEmail,
-        arguments: AuthOtpRequest(email: email, purpose: AuthOtpPurpose.signIn),
+        arguments: AuthOtpRequest(email: email),
       );
       return;
     }
@@ -57,7 +57,7 @@ class _LoginScreenState extends State<LoginScreen> {
     });
   }
 
-  Future<void> _openSignupOtp() async {
+  Future<void> _openSignupConfirmation() async {
     final email = _emailController.text.trim();
     final error = _validateEmail(email);
     if (error != null) {
@@ -67,24 +67,22 @@ class _LoginScreenState extends State<LoginScreen> {
       return;
     }
     final auth = context.read<AuthController>();
-    final success = await auth.resendOtp(
-      email: email,
-      purpose: AuthOtpPurpose.signup,
-    );
+    final success = await auth.resendSignupConfirmation(email: email);
     if (!mounted || !success) return;
     Navigator.pushNamed(
       context,
-      AppRoutes.verifyEmail,
-      arguments: AuthOtpRequest(email: email, purpose: AuthOtpPurpose.signup),
+      AppRoutes.confirmEmail,
+      arguments: email,
     );
   }
 
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthController>();
-    final requiresConfirmation =
-        auth.errorMessage?.toLowerCase().contains('confirm your email') ??
-        false;
+    final authError = auth.errorMessage?.toLowerCase() ?? '';
+    final requiresVerification =
+        authError.contains('verify your email') ||
+        authError.contains('confirm your email');
 
     return AuthShell(
       title: 'Sign in to PromptWise',
@@ -147,12 +145,14 @@ class _LoginScreenState extends State<LoginScreen> {
             const SizedBox(height: 16),
             if (auth.errorMessage != null) ...[
               _ErrorNotice(message: auth.errorMessage!),
-              if (requiresConfirmation) ...[
+              if (requiresVerification) ...[
                 const SizedBox(height: 8),
                 OutlinedButton.icon(
-                  onPressed: auth.isLoading ? null : _openSignupOtp,
+                  onPressed: auth.isLoading
+                      ? null
+                      : _openSignupConfirmation,
                   icon: const Icon(Icons.mark_email_unread_outlined),
-                  label: const Text('Send confirmation code'),
+                  label: const Text('Resend confirmation email'),
                 ),
               ],
               const SizedBox(height: 16),

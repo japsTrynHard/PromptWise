@@ -2,7 +2,6 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/config/app_environment.dart';
 import '../models/app_profile.dart';
-import '../models/auth_otp_request.dart';
 
 abstract interface class AuthGateway {
   Session? get currentSession;
@@ -21,7 +20,6 @@ abstract interface class AuthGateway {
   Future<AuthResponse> verifyEmailOtp({
     required String email,
     required String token,
-    required AuthOtpPurpose purpose,
   });
   Future<void> signOut();
   Future<void> resendSignupConfirmation(String email);
@@ -81,17 +79,11 @@ class AuthRepository implements AuthGateway {
   Future<AuthResponse> verifyEmailOtp({
     required String email,
     required String token,
-    required AuthOtpPurpose purpose,
   }) {
-    final type = switch (purpose) {
-      AuthOtpPurpose.signup => OtpType.email,
-      AuthOtpPurpose.signIn => OtpType.email,
-    };
-
     return client.auth.verifyOTP(
       email: email.trim(),
       token: token.trim(),
-      type: type,
+      type: OtpType.email,
     );
   }
 
