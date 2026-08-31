@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../../core/routes/app_routes.dart';
 import '../../../core/utils/constants.dart';
 import '../../../data/models/learning_progression.dart';
+import '../../../data/models/learning_topic.dart';
 import '../../../data/models/verification.dart';
 import '../../controllers/content_controller.dart';
 import '../../controllers/adaptive_learning_controller.dart';
@@ -41,7 +42,10 @@ class _VerifyScreenState extends State<VerifyScreen> {
 
     final started = await verification.startSession(
       caseCount: 5,
-      rankLevel: progression.overallRank.level,
+      rankLevel: progression
+          .rankFor(LearningTopic.verification)
+          .rank
+          .level,
     );
     if (!context.mounted) return;
 
