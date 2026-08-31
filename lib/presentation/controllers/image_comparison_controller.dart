@@ -20,6 +20,7 @@ class ImageComparisonController extends ChangeNotifier {
 
   List<ImageComparisonRound> _rounds = const [];
   DateTime? _lastLoadedAt;
+  Future<bool>? _roundLoadInFlight;
 
   final Set<String> _seenIds = <String>{};
 
@@ -45,6 +46,7 @@ class ImageComparisonController extends ChangeNotifier {
 
     _activeUserId = userId;
     _requestEpoch += 1;
+    _roundLoadInFlight = null;
 
     _rounds = const [];
     _lastLoadedAt = null;
@@ -107,17 +109,36 @@ class ImageComparisonController extends ChangeNotifier {
   Future<bool> _fetchRounds({
     required int count,
     required bool replaceWithFresh,
+  }) {
+    final inFlight = _roundLoadInFlight;
+    if (inFlight != null) {
+      return inFlight;
+    }
+
+    final request = _performFetchRounds(
+      count: count,
+      replaceWithFresh: replaceWithFresh,
+    );
+    _roundLoadInFlight = request;
+    return request.whenComplete(() {
+      if (identical(_roundLoadInFlight, request)) {
+        _roundLoadInFlight = null;
+      }
+    });
+  }
+
+  Future<bool> _performFetchRounds({
+    required int count,
+    required bool replaceWithFresh,
   }) async {
     final service = _service;
     final userId = _activeUserId;
     final epoch = _requestEpoch;
 
     if (service == null || userId == null) {
+      _errorMessage = 'Please sign in again to compare images.';
+      notifyListeners();
       return false;
-    }
-
-    if (_isLoading) {
-      return _rounds.length >= 2;
     }
 
     if (!replaceWithFresh && hasCachedRounds) {
@@ -182,6 +203,7 @@ class ImageComparisonController extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _requestEpoch += 1;
+    _roundLoadInFlight = null;
     super.dispose();
   }
 }

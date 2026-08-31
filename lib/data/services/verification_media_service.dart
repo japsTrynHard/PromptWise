@@ -1,10 +1,7 @@
 import 'dart:async';
-import 'dart:convert';
 
-import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-import '../../core/config/app_environment.dart';
 import '../models/image_comparison.dart';
 
 abstract interface class VerificationMediaGateway {
@@ -20,58 +17,51 @@ abstract interface class VerificationMediaGateway {
 }
 
 class VerificationMediaService implements VerificationMediaGateway {
-  VerificationMediaService({
-    required SupabaseClient client,
-    http.Client? httpClient,
-  }) : _client = client,
-       _http = httpClient ?? http.Client();
+  VerificationMediaService({required SupabaseClient client}) : _client = client;
 
   final SupabaseClient _client;
-  final http.Client _http;
 
   @override
   Future<List<ImageComparisonRound>> fetchRounds({
     int count = 5,
     Set<String> seenIds = const {},
   }) async {
-    final token = _client.auth.currentSession?.accessToken;
-    if (token == null || token.isEmpty) {
+    if (_client.auth.currentUser == null) {
       throw const VerificationMediaException(
         'Please sign in again to continue.',
       );
     }
 
-    final uri = Uri.parse(
-      '${AppEnvironment.supabaseUrl}/functions/v1/verification-media',
-    );
-    final response = await _http
-        .post(
-          uri,
-          headers: {
-            'Authorization': 'Bearer $token',
-            'apikey': AppEnvironment.supabasePublishableKey,
-            'Content-Type': 'application/json',
-            'Accept': 'application/json',
-          },
-          body: jsonEncode({
-            'count': count.clamp(3, 8),
-            'seen_ids': seenIds.take(60).toList(growable: false),
-          }),
-        )
-        .timeout(const Duration(seconds: 25));
-
-    Map<String, dynamic> body;
+    late final FunctionResponse response;
     try {
-      final decoded = jsonDecode(response.body);
-      if (decoded is! Map) throw const FormatException();
-      body = Map<String, dynamic>.from(decoded);
-    } on FormatException {
+      response = await _client.functions
+          .invoke(
+            'verification-media',
+            body: {
+              'count': count.clamp(3, 8),
+              'seen_ids': seenIds.take(60).toList(growable: false),
+            },
+          )
+          .timeout(const Duration(seconds: 25));
+    } on TimeoutException {
+      throw const VerificationMediaException(
+        'Image examples are taking too long to load. Please try again.',
+      );
+    } on FunctionException catch (error) {
+      throw VerificationMediaException(
+        _functionErrorMessage(error.details),
+      );
+    }
+
+    final data = response.data;
+    if (data is! Map) {
       throw const VerificationMediaException(
         'Image examples could not be loaded right now.',
       );
     }
+    final body = Map<String, dynamic>.from(data);
 
-    if (response.statusCode < 200 || response.statusCode >= 300) {
+    if (response.status < 200 || response.status >= 300) {
       final message = body['message']?.toString().trim();
       throw VerificationMediaException(
         message?.isNotEmpty == true
@@ -148,7 +138,15 @@ class VerificationMediaService implements VerificationMediaGateway {
     );
   }
 
-  void dispose() => _http.close();
+  void dispose() {}
+}
+
+String _functionErrorMessage(dynamic details) {
+  if (details is Map) {
+    final message = details['message']?.toString().trim();
+    if (message?.isNotEmpty == true) return message!;
+  }
+  return 'Fresh image examples are temporarily unavailable.';
 }
 
 class VerificationMediaException implements Exception {

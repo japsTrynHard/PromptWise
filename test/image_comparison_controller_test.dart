@@ -45,6 +45,49 @@ void main() {
     expect(controller.rounds, isEmpty);
   });
 
+  test('User B can load while User A request is still pending', () async {
+    final service = _FakeMediaGateway();
+    final controller = ImageComparisonController(service: service);
+    await controller.bindAuthenticatedUser('user-a');
+    final userARequest = controller.ensureRounds();
+
+    await controller.bindAuthenticatedUser('user-b');
+    final userBRequest = controller.ensureRounds();
+
+    expect(service.fetchCalls, 2);
+    service.completeFetch([_round('old-a'), _round('old-b')]);
+    expect(await userARequest, isFalse);
+    service.completeFetch([_round('new-a'), _round('new-b')]);
+
+    expect(await userBRequest, isTrue);
+    expect(controller.rounds.first.id, 'new-a');
+  });
+
+  test('overlapping round loads share the active request', () async {
+    final service = _FakeMediaGateway();
+    final controller = ImageComparisonController(service: service);
+    await controller.bindAuthenticatedUser('user-a');
+
+    final first = controller.ensureRounds();
+    final second = controller.ensureRounds();
+
+    expect(service.fetchCalls, 1);
+    service.completeFetch([_round('a'), _round('b')]);
+
+    expect(await first, isTrue);
+    expect(await second, isTrue);
+    expect(controller.rounds, hasLength(2));
+  });
+
+  test('load without an authenticated user reports a useful error', () async {
+    final controller = ImageComparisonController(
+      service: _FakeMediaGateway(),
+    );
+
+    expect(await controller.ensureRounds(), isFalse);
+    expect(controller.errorMessage, contains('sign in again'));
+  });
+
   test('User A submission result cannot update User B', () async {
     final service = _FakeMediaGateway();
     final controller = ImageComparisonController(service: service);
