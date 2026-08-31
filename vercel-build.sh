@@ -1,0 +1,11 @@
+set -e
+
+git clone https://github.com/flutter/flutter.git --depth 1 -b stable /tmp/flutter
+export PATH="/tmp/flutter/bin:$PATH"
+
+flutter config --enable-web
+flutter pub get
+
+flutter build web --release \
+  --dart-define=SUPABASE_URL="$SUPABASE_URL" \
+  --dart-define=SUPABASE_PUBLISHABLE_KEY="$SUPABASE_PUBLISHABLE_KEY"
