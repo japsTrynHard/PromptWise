@@ -21,6 +21,7 @@ class AdminContentManagementScreen extends StatefulWidget {
 class _AdminContentManagementScreenState
     extends State<AdminContentManagementScreen> {
   final _searchController = TextEditingController();
+
   String _query = '';
   ContentType? _typeFilter;
   ContentStatus? _statusFilter;
@@ -34,17 +35,22 @@ class _AdminContentManagementScreenState
   @override
   Widget build(BuildContext context) {
     final content = context.watch<ContentController>();
+
     final items = content.items
         .where((item) {
           final query = _query.trim().toLowerCase();
+
           final matchesQuery =
               query.isEmpty ||
               item.displayTitle.toLowerCase().contains(query) ||
               item.description.toLowerCase().contains(query) ||
               item.id.toLowerCase().contains(query);
+
           final matchesType = _typeFilter == null || item.type == _typeFilter;
+
           final matchesStatus =
               _statusFilter == null || item.status == _statusFilter;
+
           return matchesQuery && matchesType && matchesStatus;
         })
         .toList(growable: false);
@@ -67,6 +73,7 @@ class _AdminContentManagementScreenState
                         'Create, edit, publish, archive, and review version history for learner content.',
                   ),
                   const SizedBox(height: AppSpacing.xl),
+
                   if (content.errorMessage != null) ...[
                     _ContentErrorBanner(
                       message: content.errorMessage!,
@@ -74,26 +81,35 @@ class _AdminContentManagementScreenState
                     ),
                     const SizedBox(height: AppSpacing.lg),
                   ],
+
                   _ContentSummary(items: content.items),
+
                   const SizedBox(height: AppSpacing.xl),
+
                   _ContentToolbar(
                     searchController: _searchController,
                     query: _query,
                     typeFilter: _typeFilter,
                     statusFilter: _statusFilter,
-                    onQueryChanged: (value) => setState(() => _query = value),
+                    onQueryChanged: (value) {
+                      setState(() => _query = value);
+                    },
                     onClearSearch: () {
                       _searchController.clear();
                       setState(() => _query = '');
                     },
-                    onTypeChanged: (value) =>
-                        setState(() => _typeFilter = value),
-                    onStatusChanged: (value) =>
-                        setState(() => _statusFilter = value),
+                    onTypeChanged: (value) {
+                      setState(() => _typeFilter = value);
+                    },
+                    onStatusChanged: (value) {
+                      setState(() => _statusFilter = value);
+                    },
                     onCreate: content.isMutating ? null : () => _openEditor(),
                     onRefresh: content.isLoading ? null : content.refresh,
                   ),
+
                   const SizedBox(height: AppSpacing.xl),
+
                   if (content.isLoading && content.items.isEmpty)
                     const AppCard(
                       child: Center(child: CircularProgressIndicator()),
@@ -128,6 +144,7 @@ class _AdminContentManagementScreenState
                             onDelete: _deleteItem,
                           );
                         }
+
                         return Column(
                           children: [
                             for (
@@ -161,6 +178,7 @@ class _AdminContentManagementScreenState
                         );
                       },
                     ),
+
                   const SizedBox(height: AppSpacing.xxl),
                 ]),
               ),
@@ -173,6 +191,7 @@ class _AdminContentManagementScreenState
 
   Future<void> _openEditor([ContentItem? existing]) async {
     final controller = context.read<ContentController>();
+
     final result = await showDialog<ContentItem>(
       context: context,
       barrierDismissible: false,
@@ -181,12 +200,15 @@ class _AdminContentManagementScreenState
         availableItems: controller.items,
       ),
     );
+
     if (!mounted || result == null) return;
 
     final success = existing == null
         ? await controller.createItem(result)
         : await controller.updateItem(result);
+
     if (!mounted) return;
+
     _showResult(
       success,
       success
@@ -199,9 +221,12 @@ class _AdminContentManagementScreenState
 
   Future<void> _setStatus(ContentItem item, ContentStatus status) async {
     if (item.status == status) return;
+
     final controller = context.read<ContentController>();
     final success = await controller.setStatus(item, status);
+
     if (!mounted) return;
+
     _showResult(
       success,
       success
@@ -220,6 +245,7 @@ class _AdminContentManagementScreenState
               (candidate.parentId == item.id || candidate.quizId == item.id),
         )
         .toList(growable: false);
+
     if (dependencies.isNotEmpty) {
       _showResult(
         false,
@@ -255,11 +281,14 @@ class _AdminContentManagementScreenState
         ],
       ),
     );
+
     if (confirmed != true || !mounted) return;
 
     final controller = context.read<ContentController>();
     final success = await controller.deleteItem(item);
+
     if (!mounted) return;
+
     _showResult(
       success,
       success
@@ -270,6 +299,7 @@ class _AdminContentManagementScreenState
 
   Future<void> _showVersions(ContentItem item) async {
     final controller = context.read<ContentController>();
+
     await showDialog<void>(
       context: context,
       builder: (dialogContext) => _VersionHistoryDialog(
@@ -299,9 +329,11 @@ class _ContentSummary extends StatelessWidget {
     final published = items
         .where((item) => item.status == ContentStatus.published)
         .length;
+
     final draft = items
         .where((item) => item.status == ContentStatus.draft)
         .length;
+
     final archived = items
         .where((item) => item.status == ContentStatus.archived)
         .length;
@@ -330,19 +362,20 @@ class _ContentSummary extends StatelessWidget {
             icon: Icons.archive_outlined,
           ),
         ];
+
         final columns = constraints.maxWidth >= 920
             ? 4
             : constraints.maxWidth >= 520
             ? 2
             : 1;
+
         return GridView.count(
           crossAxisCount: columns,
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
           mainAxisSpacing: AppSpacing.md,
           crossAxisSpacing: AppSpacing.md,
-          mainAxisExtent: columns == 1 ? 104 : null,
-          childAspectRatio: 2.5,
+          childAspectRatio: columns == 1 ? constraints.maxWidth / 104 : 2.5,
           children: cards,
         );
       },
@@ -439,6 +472,7 @@ class _ContentToolbar extends StatelessWidget {
                     ),
             ),
           );
+
           final type = DropdownButtonFormField<ContentType?>(
             isExpanded: true,
             initialValue: typeFilter,
@@ -457,6 +491,7 @@ class _ContentToolbar extends StatelessWidget {
             ],
             onChanged: onTypeChanged,
           );
+
           final status = DropdownButtonFormField<ContentStatus?>(
             isExpanded: true,
             initialValue: statusFilter,
@@ -512,6 +547,7 @@ class _ContentToolbar extends StatelessWidget {
             children: [
               search,
               const SizedBox(height: AppSpacing.md),
+
               if (constraints.maxWidth >= 560)
                 Row(
                   children: [
@@ -525,7 +561,9 @@ class _ContentToolbar extends StatelessWidget {
                 const SizedBox(height: AppSpacing.md),
                 status,
               ],
+
               const SizedBox(height: AppSpacing.md),
+
               Align(alignment: Alignment.centerRight, child: actions),
             ],
           );
@@ -693,6 +731,7 @@ class _ContentCard extends StatelessWidget {
               ),
             ],
           ),
+
           if (item.description.isNotEmpty) ...[
             const SizedBox(height: AppSpacing.md),
             Text(
@@ -701,7 +740,9 @@ class _ContentCard extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
             ),
           ],
+
           const SizedBox(height: AppSpacing.lg),
+
           Wrap(
             spacing: AppSpacing.sm,
             runSpacing: AppSpacing.sm,
@@ -777,6 +818,7 @@ class _ContentActions extends StatelessWidget {
             title: Text('Edit'),
           ),
         ),
+
         if (item.status != ContentStatus.published)
           const PopupMenuItem(
             value: 'publish',
@@ -785,6 +827,7 @@ class _ContentActions extends StatelessWidget {
               title: Text('Publish'),
             ),
           ),
+
         if (item.status != ContentStatus.draft)
           const PopupMenuItem(
             value: 'draft',
@@ -793,6 +836,7 @@ class _ContentActions extends StatelessWidget {
               title: Text('Move to draft'),
             ),
           ),
+
         if (item.status != ContentStatus.archived)
           const PopupMenuItem(
             value: 'archive',
@@ -801,6 +845,7 @@ class _ContentActions extends StatelessWidget {
               title: Text('Archive'),
             ),
           ),
+
         const PopupMenuItem(
           value: 'versions',
           child: ListTile(
@@ -808,6 +853,7 @@ class _ContentActions extends StatelessWidget {
             title: Text('Version history'),
           ),
         ),
+
         if (item.status == ContentStatus.draft)
           const PopupMenuItem(
             value: 'delete',
@@ -837,8 +883,10 @@ class _ContentEditorDialog extends StatefulWidget {
 
 class _ContentEditorDialogState extends State<_ContentEditorDialog> {
   final _formKey = GlobalKey<FormState>();
+
   late ContentType _type;
   late ContentStatus _status;
+
   late final TextEditingController _id;
   late final TextEditingController _title;
   late final TextEditingController _description;
@@ -853,11 +901,15 @@ class _ContentEditorDialogState extends State<_ContentEditorDialog> {
   late final TextEditingController _imageB;
   late final TextEditingController _sortOrder;
   late final TextEditingController _sourceUrl;
+
   String? _parentId;
   String? _quizId;
+
   LearningTopic? _adaptiveTopic;
+
   int _learningLevel = 1;
   bool _isAAI = false;
+
   DateTime? _publicationDate;
   DateTime? _reviewDate;
 
@@ -866,34 +918,55 @@ class _ContentEditorDialogState extends State<_ContentEditorDialog> {
   @override
   void initState() {
     super.initState();
+
     final item = widget.existing;
+
     _type = item?.type ?? ContentType.module;
     _status = item?.status ?? ContentStatus.draft;
+
     _id = TextEditingController(text: item?.id ?? '');
+
     _title = TextEditingController(text: item?.title ?? '');
+
     _description = TextEditingController(text: item?.description ?? '');
+
     _body = TextEditingController(text: item?.body ?? '');
+
     _icon = TextEditingController(text: item?.icon ?? 'ai');
+
     _estimatedMinutes = TextEditingController(
       text: '${item?.estimatedMinutes ?? 5}',
     );
+
     _question = TextEditingController(text: item?.question ?? '');
+
     _options = TextEditingController(text: item?.options.join('\n') ?? '');
+
     _correctOption = TextEditingController(
       text: item?.correctIndex == null ? '1' : '${item!.correctIndex! + 1}',
     );
+
     _explanation = TextEditingController(text: item?.explanation ?? '');
+
     _imageA = TextEditingController(text: item?.imagePathA ?? '');
+
     _imageB = TextEditingController(text: item?.imagePathB ?? '');
+
     _sortOrder = TextEditingController(text: '${item?.sortOrder ?? 0}');
+
     _sourceUrl = TextEditingController(text: item?.sourceUrl ?? '');
+
     _parentId = item?.parentId;
     _quizId = item?.quizId;
+
     _adaptiveTopic = item?.type == ContentType.activity
         ? LearningTopic.verification
         : item?.adaptiveTopic;
+
     _learningLevel = (item?.learningLevel ?? 1).clamp(1, 5);
+
     _isAAI = item?.isAAI ?? false;
+
     _publicationDate = item?.publicationDate;
     _reviewDate = item?.reviewDate;
   }
@@ -918,6 +991,7 @@ class _ContentEditorDialogState extends State<_ContentEditorDialog> {
     ]) {
       controller.dispose();
     }
+
     super.dispose();
   }
 
@@ -926,6 +1000,7 @@ class _ContentEditorDialogState extends State<_ContentEditorDialog> {
     final modules = widget.availableItems
         .where((item) => item.type == ContentType.module)
         .toList(growable: false);
+
     final quizzes = widget.availableItems
         .where((item) => item.type == ContentType.quiz)
         .toList(growable: false);
@@ -962,7 +1037,9 @@ class _ContentEditorDialogState extends State<_ContentEditorDialog> {
                 ],
               ),
             ),
+
             const Divider(height: 1),
+
             Expanded(
               child: SingleChildScrollView(
                 padding: const EdgeInsets.all(AppSpacing.xl),
@@ -990,20 +1067,28 @@ class _ContentEditorDialogState extends State<_ContentEditorDialog> {
                             onChanged: _isEditing
                                 ? null
                                 : (value) {
-                                    if (value == null) return;
+                                    if (value == null) {
+                                      return;
+                                    }
+
                                     final previousType = _type;
+
                                     setState(() {
                                       _type = value;
                                       _parentId = null;
                                       _quizId = null;
+
                                       if (value == ContentType.activity) {
-                                        _adaptiveTopic = LearningTopic.verification;
-                                      } else if (previousType == ContentType.activity) {
+                                        _adaptiveTopic =
+                                            LearningTopic.verification;
+                                      } else if (previousType ==
+                                          ContentType.activity) {
                                         _adaptiveTopic = null;
                                       }
                                     });
                                   },
                           );
+
                           final status = DropdownButtonFormField<ContentStatus>(
                             isExpanded: true,
                             initialValue: _status,
@@ -1024,6 +1109,7 @@ class _ContentEditorDialogState extends State<_ContentEditorDialog> {
                               }
                             },
                           );
+
                           if (constraints.maxWidth >= 540) {
                             return Row(
                               children: [
@@ -1033,6 +1119,7 @@ class _ContentEditorDialogState extends State<_ContentEditorDialog> {
                               ],
                             );
                           }
+
                           return Column(
                             children: [
                               type,
@@ -1042,7 +1129,9 @@ class _ContentEditorDialogState extends State<_ContentEditorDialog> {
                           );
                         },
                       ),
+
                       const SizedBox(height: AppSpacing.md),
+
                       TextFormField(
                         controller: _id,
                         readOnly: _isEditing,
@@ -1056,19 +1145,27 @@ class _ContentEditorDialogState extends State<_ContentEditorDialog> {
                         ),
                         validator: (value) {
                           final id = value?.trim() ?? '';
-                          if (id.isEmpty && !_isEditing) return null;
+
+                          if (id.isEmpty && !_isEditing) {
+                            return null;
+                          }
+
                           return RegExp(r'^[a-z0-9_\-]+$').hasMatch(id)
                               ? null
                               : 'Use lowercase letters, numbers, hyphens, or underscores.';
                         },
                       ),
+
                       const SizedBox(height: AppSpacing.md),
+
                       TextFormField(
                         controller: _title,
                         decoration: const InputDecoration(labelText: 'Title'),
                         validator: _required('Enter a title.'),
                       ),
+
                       const SizedBox(height: AppSpacing.md),
+
                       DropdownButtonFormField<LearningTopic?>(
                         isExpanded: true,
                         initialValue: _adaptiveTopic,
@@ -1077,8 +1174,8 @@ class _ContentEditorDialogState extends State<_ContentEditorDialog> {
                           helperText: _type == ContentType.activity
                               ? 'Verification activities always contribute to Verification mastery.'
                               : _type == ContentType.quiz
-                                  ? 'Required for stable mastery tracking and recommendations.'
-                                  : 'Used for mastery tracking and personalized recommendations. Automatic inference is allowed for modules and lessons.',
+                              ? 'Required for stable mastery tracking and recommendations.'
+                              : 'Used for mastery tracking and personalized recommendations. Automatic inference is allowed for modules and lessons.',
                         ),
                         items: [
                           if (_type != ContentType.quiz &&
@@ -1087,6 +1184,7 @@ class _ContentEditorDialogState extends State<_ContentEditorDialog> {
                               value: null,
                               child: Text('Automatic'),
                             ),
+
                           ...LearningTopic.values.map(
                             (topic) => DropdownMenuItem<LearningTopic?>(
                               value: topic,
@@ -1100,13 +1198,18 @@ class _ContentEditorDialogState extends State<_ContentEditorDialog> {
                               _adaptiveTopic == null) {
                             return 'Choose an adaptive learning topic.';
                           }
+
                           return null;
                         },
                         onChanged: _type == ContentType.activity
                             ? null
-                            : (value) => setState(() => _adaptiveTopic = value),
+                            : (value) {
+                                setState(() => _adaptiveTopic = value);
+                              },
                       ),
+
                       const SizedBox(height: AppSpacing.md),
+
                       if (_type == ContentType.module ||
                           _type == ContentType.lesson ||
                           _type == ContentType.quiz) ...[
@@ -1119,9 +1222,18 @@ class _ContentEditorDialogState extends State<_ContentEditorDialog> {
                                 'Controls progression: 1 Foundation, 2 Developing, 3 Proficient, 4 Advanced, 5 Expert.',
                           ),
                           items: const [
-                            DropdownMenuItem(value: 1, child: Text('Foundation')),
-                            DropdownMenuItem(value: 2, child: Text('Developing')),
-                            DropdownMenuItem(value: 3, child: Text('Proficient')),
+                            DropdownMenuItem(
+                              value: 1,
+                              child: Text('Foundation'),
+                            ),
+                            DropdownMenuItem(
+                              value: 2,
+                              child: Text('Developing'),
+                            ),
+                            DropdownMenuItem(
+                              value: 3,
+                              child: Text('Proficient'),
+                            ),
                             DropdownMenuItem(value: 4, child: Text('Advanced')),
                             DropdownMenuItem(value: 5, child: Text('Expert')),
                           ],
@@ -1133,13 +1245,18 @@ class _ContentEditorDialogState extends State<_ContentEditorDialog> {
                         ),
                         const SizedBox(height: AppSpacing.md),
                       ],
+
                       ..._typeSpecificFields(modules, quizzes),
+
                       const SizedBox(height: AppSpacing.lg),
+
                       Text(
                         'Publishing information',
                         style: Theme.of(context).textTheme.titleMedium,
                       ),
+
                       const SizedBox(height: AppSpacing.md),
+
                       TextFormField(
                         controller: _sourceUrl,
                         keyboardType: TextInputType.url,
@@ -1150,8 +1267,13 @@ class _ContentEditorDialogState extends State<_ContentEditorDialog> {
                         ),
                         validator: (value) {
                           final text = value?.trim() ?? '';
-                          if (text.isEmpty) return null;
+
+                          if (text.isEmpty) {
+                            return null;
+                          }
+
                           final uri = Uri.tryParse(text);
+
                           return uri != null &&
                                   (uri.scheme == 'https' ||
                                       uri.scheme == 'http')
@@ -1159,21 +1281,27 @@ class _ContentEditorDialogState extends State<_ContentEditorDialog> {
                               : 'Enter a complete web link.';
                         },
                       ),
+
                       const SizedBox(height: AppSpacing.md),
+
                       LayoutBuilder(
                         builder: (context, constraints) {
                           final publication = _DateField(
                             label: 'Publication date',
                             value: _publicationDate,
-                            onChanged: (value) =>
-                                setState(() => _publicationDate = value),
+                            onChanged: (value) {
+                              setState(() => _publicationDate = value);
+                            },
                           );
+
                           final review = _DateField(
                             label: 'Review date',
                             value: _reviewDate,
-                            onChanged: (value) =>
-                                setState(() => _reviewDate = value),
+                            onChanged: (value) {
+                              setState(() => _reviewDate = value);
+                            },
                           );
+
                           if (constraints.maxWidth >= 540) {
                             return Row(
                               children: [
@@ -1183,6 +1311,7 @@ class _ContentEditorDialogState extends State<_ContentEditorDialog> {
                               ],
                             );
                           }
+
                           return Column(
                             children: [
                               publication,
@@ -1192,7 +1321,9 @@ class _ContentEditorDialogState extends State<_ContentEditorDialog> {
                           );
                         },
                       ),
+
                       const SizedBox(height: AppSpacing.md),
+
                       TextFormField(
                         controller: _sortOrder,
                         keyboardType: TextInputType.number,
@@ -1210,7 +1341,9 @@ class _ContentEditorDialogState extends State<_ContentEditorDialog> {
                 ),
               ),
             ),
+
             const Divider(height: 1),
+
             Padding(
               padding: const EdgeInsets.all(AppSpacing.lg),
               child: Row(
@@ -1257,6 +1390,7 @@ class _ContentEditorDialogState extends State<_ContentEditorDialog> {
             ),
           ),
         ];
+
       case ContentType.lesson:
         return [
           DropdownButtonFormField<String>(
@@ -1277,12 +1411,16 @@ class _ContentEditorDialogState extends State<_ContentEditorDialog> {
                   ),
                 )
                 .toList(growable: false),
-            onChanged: (value) => setState(() => _parentId = value),
+            onChanged: (value) {
+              setState(() => _parentId = value);
+            },
             validator: (value) => value == null || value.isEmpty
                 ? 'Select the module that contains this lesson.'
                 : null,
           ),
+
           const SizedBox(height: AppSpacing.md),
+
           TextFormField(
             controller: _body,
             minLines: 8,
@@ -1290,7 +1428,9 @@ class _ContentEditorDialogState extends State<_ContentEditorDialog> {
             decoration: const InputDecoration(labelText: 'Lesson content'),
             validator: _required('Enter the lesson content.'),
           ),
+
           const SizedBox(height: AppSpacing.md),
+
           LayoutBuilder(
             builder: (context, constraints) {
               final minutes = TextFormField(
@@ -1301,11 +1441,13 @@ class _ContentEditorDialogState extends State<_ContentEditorDialog> {
                 ),
                 validator: (value) {
                   final parsed = int.tryParse(value ?? '');
+
                   return parsed == null || parsed < 1
                       ? 'Enter at least 1 minute.'
                       : null;
                 },
               );
+
               final quiz = DropdownButtonFormField<String?>(
                 isExpanded: true,
                 initialValue: quizzes.any((item) => item.id == _quizId)
@@ -1328,8 +1470,11 @@ class _ContentEditorDialogState extends State<_ContentEditorDialog> {
                     ),
                   ),
                 ],
-                onChanged: (value) => setState(() => _quizId = value),
+                onChanged: (value) {
+                  setState(() => _quizId = value);
+                },
               );
+
               if (constraints.maxWidth >= 540) {
                 return Row(
                   children: [
@@ -1339,6 +1484,7 @@ class _ContentEditorDialogState extends State<_ContentEditorDialog> {
                   ],
                 );
               }
+
               return Column(
                 children: [
                   minutes,
@@ -1349,6 +1495,7 @@ class _ContentEditorDialogState extends State<_ContentEditorDialog> {
             },
           ),
         ];
+
       case ContentType.quiz:
         return [
           TextFormField(
@@ -1356,14 +1503,18 @@ class _ContentEditorDialogState extends State<_ContentEditorDialog> {
             maxLines: 2,
             decoration: const InputDecoration(labelText: 'Quiz description'),
           ),
+
           const SizedBox(height: AppSpacing.md),
+
           TextFormField(
             controller: _question,
             maxLines: 3,
             decoration: const InputDecoration(labelText: 'Question'),
             validator: _required('Enter the quiz question.'),
           ),
+
           const SizedBox(height: AppSpacing.md),
+
           TextFormField(
             controller: _options,
             minLines: 3,
@@ -1374,12 +1525,15 @@ class _ContentEditorDialogState extends State<_ContentEditorDialog> {
             ),
             validator: (value) {
               final options = _splitOptions(value ?? '');
+
               return options.length < 2
                   ? 'Enter at least two answer options.'
                   : null;
             },
           ),
+
           const SizedBox(height: AppSpacing.md),
+
           TextFormField(
             controller: _correctOption,
             keyboardType: TextInputType.number,
@@ -1390,7 +1544,9 @@ class _ContentEditorDialogState extends State<_ContentEditorDialog> {
             ),
             validator: (value) {
               final optionNumber = int.tryParse(value ?? '');
+
               final options = _splitOptions(_options.text);
+
               return optionNumber == null ||
                       optionNumber < 1 ||
                       optionNumber > options.length
@@ -1398,7 +1554,9 @@ class _ContentEditorDialogState extends State<_ContentEditorDialog> {
                   : null;
             },
           ),
+
           const SizedBox(height: AppSpacing.md),
+
           TextFormField(
             controller: _explanation,
             minLines: 3,
@@ -1407,6 +1565,7 @@ class _ContentEditorDialogState extends State<_ContentEditorDialog> {
             validator: _required('Explain why the answer is correct.'),
           ),
         ];
+
       case ContentType.activity:
         return [
           TextFormField(
@@ -1417,13 +1576,17 @@ class _ContentEditorDialogState extends State<_ContentEditorDialog> {
             ),
             validator: _required('Enter the first image asset path.'),
           ),
+
           const SizedBox(height: AppSpacing.md),
+
           TextFormField(
             controller: _imageB,
             decoration: const InputDecoration(labelText: 'Image B path or URL'),
             validator: _required('Enter the second image asset path.'),
           ),
+
           const SizedBox(height: AppSpacing.md),
+
           SwitchListTile.adaptive(
             contentPadding: EdgeInsets.zero,
             title: const Text('Image A is the AI-generated answer'),
@@ -1433,9 +1596,13 @@ class _ContentEditorDialogState extends State<_ContentEditorDialog> {
                   : 'Learners should select Image B.',
             ),
             value: _isAAI,
-            onChanged: (value) => setState(() => _isAAI = value),
+            onChanged: (value) {
+              setState(() => _isAAI = value);
+            },
           ),
+
           const SizedBox(height: AppSpacing.md),
+
           TextFormField(
             controller: _explanation,
             minLines: 3,
@@ -1446,6 +1613,7 @@ class _ContentEditorDialogState extends State<_ContentEditorDialog> {
             validator: _required('Enter the activity explanation.'),
           ),
         ];
+
       case ContentType.awareness:
         return [
           TextFormField(
@@ -1462,7 +1630,10 @@ class _ContentEditorDialogState extends State<_ContentEditorDialog> {
   }
 
   void _save() {
-    if (!_formKey.currentState!.validate()) return;
+    if (!_formKey.currentState!.validate()) {
+      return;
+    }
+
     if (_publicationDate != null &&
         _reviewDate != null &&
         _reviewDate!.isBefore(_publicationDate!)) {
@@ -1475,11 +1646,15 @@ class _ContentEditorDialogState extends State<_ContentEditorDialog> {
     }
 
     final title = _title.text.trim();
+
     final id = _id.text.trim().isEmpty
         ? _generateId(_type, title)
         : _id.text.trim();
+
     final options = _splitOptions(_options.text);
+
     final correctNumber = int.tryParse(_correctOption.text.trim());
+
     final existing = widget.existing;
 
     Navigator.pop(
@@ -1545,12 +1720,16 @@ class _DateField extends StatelessWidget {
       child: Row(
         children: [
           Expanded(child: Text(_shortDate(value))),
+
           if (value != null)
             IconButton(
               tooltip: 'Clear $label',
-              onPressed: () => onChanged(null),
+              onPressed: () {
+                onChanged(null);
+              },
               icon: const Icon(Icons.close_rounded),
             ),
+
           IconButton(
             tooltip: 'Select $label',
             onPressed: () async {
@@ -1560,7 +1739,10 @@ class _DateField extends StatelessWidget {
                 firstDate: DateTime(2020),
                 lastDate: DateTime(2100),
               );
-              if (selected != null) onChanged(selected);
+
+              if (selected != null) {
+                onChanged(selected);
+              }
             },
             icon: const Icon(Icons.calendar_today_outlined),
           ),
@@ -1594,13 +1776,16 @@ class _VersionHistoryDialog extends StatelessWidget {
                 child: Center(child: CircularProgressIndicator()),
               );
             }
+
             if (snapshot.hasError) {
               return StateMessage.error(
                 title: 'Unable to load versions',
                 message: snapshot.error.toString(),
               );
             }
+
             final versions = snapshot.data ?? const <ContentVersion>[];
+
             if (versions.isEmpty) {
               return const StateMessage.empty(
                 title: 'No previous versions',
@@ -1608,6 +1793,7 @@ class _VersionHistoryDialog extends StatelessWidget {
                     'A snapshot is created when this content is updated or deleted.',
               );
             }
+
             return ConstrainedBox(
               constraints: const BoxConstraints(maxHeight: 460),
               child: ListView.separated(
@@ -1616,6 +1802,7 @@ class _VersionHistoryDialog extends StatelessWidget {
                 separatorBuilder: (_, __) => const Divider(),
                 itemBuilder: (context, index) {
                   final version = versions[index];
+
                   return ListTile(
                     leading: CircleAvatar(child: Text('v${version.version}')),
                     title: Text(version.snapshot.displayTitle),
@@ -1654,6 +1841,7 @@ class _ContentStatusChip extends StatelessWidget {
       ContentStatus.draft => AppColors.warning,
       ContentStatus.archived => Theme.of(context).colorScheme.onSurfaceVariant,
     };
+
     return Chip(
       label: Text(status.label),
       labelStyle: TextStyle(color: color, fontWeight: FontWeight.w700),
@@ -1680,7 +1868,9 @@ class _ContentErrorBanner extends StatelessWidget {
             Icons.error_outline_rounded,
             color: Theme.of(context).colorScheme.onErrorContainer,
           ),
+
           const SizedBox(width: AppSpacing.md),
+
           Expanded(
             child: Text(
               message,
@@ -1689,7 +1879,9 @@ class _ContentErrorBanner extends StatelessWidget {
               ),
             ),
           ),
+
           const SizedBox(width: AppSpacing.sm),
+
           TextButton(onPressed: onRetry, child: const Text('Retry')),
         ],
       ),
@@ -1714,23 +1906,37 @@ String _generateId(ContentType type, String title) {
       .toLowerCase()
       .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
       .replaceAll(RegExp(r'^_+|_+$'), '');
+
   final suffix = DateTime.now().millisecondsSinceEpoch.toString();
+
   final shortSuffix = suffix.substring(suffix.length - 6);
+
   return '${type.name}_${slug.isEmpty ? 'content' : slug}_$shortSuffix';
 }
 
 String _shortDate(DateTime? date) {
-  if (date == null) return 'Not set';
+  if (date == null) {
+    return 'Not set';
+  }
+
   final month = date.month.toString().padLeft(2, '0');
+
   final day = date.day.toString().padLeft(2, '0');
+
   return '${date.year}-$month-$day';
 }
 
 String _shortDateTime(DateTime? date) {
-  if (date == null) return 'Date unavailable';
+  if (date == null) {
+    return 'Date unavailable';
+  }
+
   final local = date.toLocal();
+
   final hour = local.hour.toString().padLeft(2, '0');
+
   final minute = local.minute.toString().padLeft(2, '0');
+
   return '${_shortDate(local)} $hour:$minute';
 }
 
