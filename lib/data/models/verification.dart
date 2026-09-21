@@ -703,6 +703,35 @@ class VerificationCaseHealth {
     required this.byLevel,
   });
 
+  /// Derives admin-only case-bank statistics from the already-authorized
+  /// published-case response. Avoids an exposed security-definer view and
+  /// avoids granting learners SELECT access to answer-bearing case records.
+  static List<VerificationCaseHealth> fromPublishedCases(
+    Iterable<VerificationCase> cases,
+  ) {
+    final counts = <VerificationSubskill, Map<int, int>>{};
+    for (final item in cases) {
+      final byLevel = counts.putIfAbsent(item.subskill, () => <int, int>{});
+      final level = item.difficulty.level;
+      byLevel[level] = (byLevel[level] ?? 0) + 1;
+    }
+    return [
+      for (final subskill in VerificationSubskill.values)
+        if (counts.containsKey(subskill))
+          VerificationCaseHealth(
+            subskill: subskill,
+            publishedCases: counts[subskill]!.values.fold<int>(
+              0,
+              (total, value) => total + value,
+            ),
+            byLevel: {
+              for (var level = 1; level <= 5; level++)
+                level: counts[subskill]![level] ?? 0,
+            },
+          ),
+    ];
+  }
+
   factory VerificationCaseHealth.fromMap(Map<String, dynamic> map) {
     final subskill = VerificationSubskillX.fromId(map['subskill']?.toString());
     if (subskill == null) throw const FormatException('Unknown health subskill.');

@@ -98,26 +98,6 @@ class VerificationRepository {
     return result;
   }
 
-  Future<List<VerificationCaseHealth>> fetchHealth() async {
-    final response = await _client
-        .from('phase9_verification_case_health')
-        .select()
-        .order('subskill');
-    final result = <VerificationCaseHealth>[];
-    for (final row in response as List) {
-      try {
-        result.add(
-          VerificationCaseHealth.fromMap(
-            Map<String, dynamic>.from(row as Map),
-          ),
-        );
-      } on FormatException {
-        // Ignore malformed aggregate rows.
-      }
-    }
-    return result;
-  }
-
   Future<List<VerificationCase>> fetchPublishedCases() async {
     final response = await _client.rpc('admin_list_verification_cases');
     final rows = response is List ? response : const [];

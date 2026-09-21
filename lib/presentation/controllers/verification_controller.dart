@@ -458,7 +458,6 @@ class VerificationStudioController extends ChangeNotifier {
     // Start independent reads together instead of waiting for each network
     // request one-by-one. This substantially lowers Studio load latency.
     final draftsFuture = repository.fetchDrafts();
-    final healthFuture = repository.fetchHealth();
     final casesFuture = repository.fetchPublishedCases();
     final overviewFuture = repository.fetchAutomationOverview();
 
@@ -471,16 +470,11 @@ class VerificationStudioController extends ChangeNotifier {
       if (!_isCurrentAdmin(epoch)) return;
 
       try {
-        nextHealth = await healthFuture;
-      } catch (_) {
-        failures.add('case health');
-      }
-      if (!_isCurrentAdmin(epoch)) return;
-
-      try {
         nextCases = await casesFuture;
+        nextHealth = VerificationCaseHealth.fromPublishedCases(nextCases);
       } catch (_) {
-        failures.add('case bank');
+        // Preserve the previous case bank and its matching health summary.
+        failures.add('case bank / case health');
       }
       if (!_isCurrentAdmin(epoch)) return;
 
