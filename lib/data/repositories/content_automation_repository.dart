@@ -128,6 +128,12 @@ class ContentAutomationRepository {
       );
     }
     if (data is Map) {
+      // The HTTP 200 response can contain a partial run with drafts saved.
+      // Do not display it as a green success notification to administrators.
+      if (data['partial'] == true || data['success'] == false) {
+        throw StateError(data['message']?.toString() ??
+            'Content automation encountered errors. Refresh the draft list.');
+      }
       return data['message']?.toString() ?? 'Automation completed.';
     }
     return 'Automation completed.';
@@ -150,6 +156,10 @@ class ContentAutomationRepository {
       );
     }
     if (data is Map) {
+      if (data['partial'] == true || data['success'] == false) {
+        throw StateError(data['message']?.toString() ??
+            'Verification draft generation encountered errors. Refresh the draft list.');
+      }
       return data['message']?.toString() ??
           'Verification draft check completed.';
     }

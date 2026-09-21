@@ -1,0 +1,20 @@
+// Static integration checks only: this does not deploy or call Groq/Supabase.
+const fs = require('node:fs');
+const path = require('node:path');
+const assert = require('node:assert/strict');
+const root = path.resolve(__dirname, '..');
+const read = name => fs.readFileSync(path.join(root, name), 'utf8');
+const edge = read('supabase/functions/content-automation/index.ts');
+const sql = read('supabase/migrations/20260922030000_automation_partial_run_status.sql');
+const repo = read('lib/data/repositories/content_automation_repository.dart');
+assert.match(edge, /import \{ classifyRun, queueIsFull, validateLessonDraft \} from '\.\/quality\.mjs'/);
+assert.match(edge, /const reviewQueueFull = queueIsFull\(/);
+assert.match(edge, /const runStatus = classifyRun\(draftsCreated, failures\)/);
+assert.match(edge, /const runStatus = classifyRun\(result\.created, hardFailures\)/);
+assert.match(edge, /validateLessonDraft\(draft\)/);
+assert.match(edge, /errorMessage: failures > 0 \? diagnostic : undefined/);
+assert.match(edge, /if \(completionError\) throw completionError/);
+assert.match(sql, /'completed_with_errors'/);
+assert.match(repo, /data\['partial'\] == true/);
+assert.match(edge, /claim_content_automation_run/);
+console.log('PASS: 10 static integration checks (not live Groq/DB tests).');

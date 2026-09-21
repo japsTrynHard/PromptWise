@@ -1,5 +1,6 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { XMLParser } from 'npm:fast-xml-parser@4.5.3';
+import { classifyRun, queueIsFull, validateLessonDraft } from './quality.mjs';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -7,14 +8,6 @@ const corsHeaders = {
     'authorization, x-client-info, apikey, content-type, x-automation-secret',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
-
-const TOPICS = new Set([
-  'prompt_clarity',
-  'context',
-  'specificity',
-  'responsible_use',
-  'verification',
-]);
 
 const UNIVERSAL_KEYWORDS = [
   'artificial intelligence',
@@ -279,20 +272,23 @@ Deno.serve(async (req) => {
       Number(verificationSettings.max_pending_drafts ?? 40),
     );
 
-    const queueIsFull = target === 'verification'
-      ? pendingVerificationDrafts >= maxPendingVerificationDrafts
-      : pendingDrafts >= maxPendingDrafts ||
-        pendingQuestions >= maxPendingQuestions ||
-        pendingVerificationDrafts >= maxPendingVerificationDrafts;
+    const reviewQueueFull = queueIsFull({
+      target,
+      pendingDrafts,
+      pendingQuestions,
+      pendingVerificationDrafts,
+      maxPendingDrafts,
+      maxPendingQuestions,
+      maxPendingVerificationDrafts,
+    });
 
-    if (queueIsFull) {
+    if (reviewQueueFull) {
       const queueMessage = target === 'verification'
         ? `Verification draft generation paused because the Verify review queue is full (${pendingVerificationDrafts}/${maxPendingVerificationDrafts}). Review or archive pending Verify drafts before generating more.`
         : `Content automation paused because the admin review queue is full. ` +
           `Lesson drafts: ${pendingDrafts}/${maxPendingDrafts}; ` +
           `questions: ${pendingQuestions}/${maxPendingQuestions}; ` +
-          `verification drafts: ${pendingVerificationDrafts}/${maxPendingVerificationDrafts}. ` +
-          `Review or archive pending AI content before generating more.`;
+          `Review or archive pending lesson/question drafts before generating more.`;
 
       await service.from('automation_runs').insert({
         trigger_mode: mode,
@@ -476,16 +472,18 @@ Deno.serve(async (req) => {
 
         const hardFailures =
           result.sourceFetchFailed + result.generationFailed + result.insertFailed;
-        const runFailed = result.created === 0 && hardFailures > 0;
+        const runStatus = classifyRun(result.created, hardFailures);
+        const runFailed = runStatus === 'failed';
+        const partial = runStatus === 'completed_with_errors';
         const diagnostic = verificationDiagnostic(result);
 
         await completeRun(service, runId, {
-          status: runFailed ? 'failed' : 'completed',
+          status: runStatus,
           sourcesChecked: result.snapshotUsed > 0 ? 0 : 1,
           articlesDiscovered: result.considered,
           draftsCreated: 0,
           verificationDraftsCreated: result.created,
-          errorMessage: runFailed ? diagnostic : undefined,
+          errorMessage: hardFailures > 0 ? diagnostic : undefined,
         });
 
         if (mode === 'manual') {
@@ -511,8 +509,10 @@ Deno.serve(async (req) => {
           }
         }
 
-        const message = result.created > 0
-          ? `Verification check completed. ${result.created} fresh AI draft${result.created === 1 ? '' : 's'} created from current Awareness sources for administrator review.`
+        const message = partial
+          ? `Partial verification run: ${result.created} draft${result.created === 1 ? '' : 's'} saved for review, but ${hardFailures} source/generation/save failure${hardFailures === 1 ? '' : 's'} occurred. ${diagnostic} Refresh the draft list.`
+          : result.created > 0
+            ? `Verification check completed. ${result.created} fresh AI draft${result.created === 1 ? '' : 's'} created from current Awareness sources for administrator review.`
           : hardFailures > 0
             ? `Verification draft generation could not complete. ${diagnostic}`
             : result.rowsFound === 0
@@ -523,7 +523,9 @@ Deno.serve(async (req) => {
 
         return jsonResponse({
           message,
-          success: !runFailed,
+          success: runStatus === 'completed',
+          partial,
+          runStatus,
           verificationDraftsCreated: result.created,
           articlesFound: result.rowsFound,
           articlesConsidered: result.considered,
@@ -604,6 +606,7 @@ Deno.serve(async (req) => {
       const sources = (sourceRows ?? []) as SourceRow[];
       const candidates: Candidate[] = [];
       let sourcesChecked = 0;
+      let sourceFailures = 0;
 
       for (const source of sources) {
         try {
@@ -618,6 +621,7 @@ Deno.serve(async (req) => {
             })
             .eq('id', source.id);
         } catch (error) {
+          sourceFailures += 1;
           console.error(`Source check failed: ${source.name}`, error);
           // One source must not abort the whole run.
         }
@@ -763,28 +767,43 @@ Deno.serve(async (req) => {
         }
       }
 
+      const failures = processingFailures + sourceFailures;
+      const runStatus = classifyRun(draftsCreated, failures);
+      const partial = runStatus === 'completed_with_errors';
+      const runFailed = runStatus === 'failed';
+      const diagnostic = `${sourceFailures} source check failure${sourceFailures === 1 ? '' : 's'}; ` +
+        `${processingFailures} article processing failure${processingFailures === 1 ? '' : 's'}.`;
+
       await completeRun(service, runId, {
-        status: 'completed',
+        status: runStatus,
         sourcesChecked,
         articlesDiscovered,
         draftsCreated,
         verificationDraftsCreated,
+        errorMessage: failures > 0 ? diagnostic : undefined,
       });
 
-      const message = draftsCreated > 0 || verificationDraftsCreated > 0
-        ? `Content check completed. ${draftsCreated} lesson draft${draftsCreated === 1 ? '' : 's'} and ${verificationDraftsCreated} verification case draft${verificationDraftsCreated === 1 ? '' : 's'} created from trusted sources.`
-        : processingFailures > 0
-          ? `Content check completed, but ${processingFailures} candidate article${processingFailures === 1 ? '' : 's'} could not be converted into a valid draft. Check the Edge Function logs.`
-          : 'Content check completed. No new relevant, non-duplicate draft was needed.';
+      const message = partial
+        ? `Partial content run: ${draftsCreated} lesson draft${draftsCreated === 1 ? '' : 's'} saved for review, but ${diagnostic} Refresh the draft list and check Edge Function logs.`
+        : runFailed
+          ? `Content generation failed; no lesson drafts were created. ${diagnostic} Check Edge Function logs.`
+          : draftsCreated > 0
+            ? `Content check completed. ${draftsCreated} lesson draft${draftsCreated === 1 ? '' : 's'} and ${verificationDraftsCreated} verification case draft${verificationDraftsCreated === 1 ? '' : 's'} created from trusted sources.`
+            : 'Content check completed. No new relevant, non-duplicate draft was needed.';
 
       return jsonResponse({
         message,
+        ...(runFailed ? { error: message } : {}),
+        success: runStatus === 'completed',
+        partial,
+        runStatus,
         sourcesChecked,
+        sourceFailures,
         articlesDiscovered,
         draftsCreated,
         processingFailures,
         verificationDraftsCreated,
-      });
+      }, runFailed ? 502 : 200);
     } catch (error) {
       await completeRun(service, runId, {
         status: 'failed',
@@ -1730,53 +1749,7 @@ A previous generation attempt failed PromptWise validation. Make this response f
 }
 
 function validateDraft(draft: GeneratedDraftPayload): void {
-  if (!draft || typeof draft !== 'object') throw new Error('Invalid draft payload.');
-  if (!nonEmpty(draft.title) || !nonEmpty(draft.summary)) {
-    throw new Error('Generated draft is missing a title or summary.');
-  }
-  if (!TOPICS.has(draft.topic_id)) throw new Error('Generated topic is invalid.');
-  if (!Number.isInteger(draft.target_level) || draft.target_level < 1 || draft.target_level > 5) {
-    throw new Error('Generated target level is invalid.');
-  }
-  if (!Array.isArray(draft.objectives) || draft.objectives.length < 3) {
-    throw new Error('Generated draft needs at least three learning objectives.');
-  }
-  for (const objective of draft.objectives) {
-    if (!nonEmpty(objective?.title) || !nonEmpty(objective?.description)) {
-      throw new Error('Generated learning objective is incomplete.');
-    }
-  }
-  if (!Array.isArray(draft.lesson_sections) || draft.lesson_sections.length < 5) {
-    throw new Error('Generated lesson is not deep enough.');
-  }
-  if (draft.lesson_sections.some((section) => !nonEmpty(section) || section.length < 80)) {
-    throw new Error('Generated lesson contains an underdeveloped section.');
-  }
-  if (!Array.isArray(draft.questions) || draft.questions.length < 5) {
-    throw new Error('Generated draft needs at least five questions.');
-  }
-
-  for (const question of draft.questions) {
-    if (!['concept', 'scenario', 'best_response', 'evaluation'].includes(question.question_type)) {
-      throw new Error('Generated question type is invalid.');
-    }
-    if (!nonEmpty(question.stem) || !nonEmpty(question.explanation)) {
-      throw new Error('Generated question is incomplete.');
-    }
-    if (!Array.isArray(question.options) || question.options.length !== 4) {
-      throw new Error('Every generated question must have four options.');
-    }
-    const normalizedOptions = question.options.map((option) => option.trim().toLowerCase());
-    if (normalizedOptions.some((option) => !option) || new Set(normalizedOptions).size !== 4) {
-      throw new Error('Generated question options must be non-empty and distinct.');
-    }
-    if (!Number.isInteger(question.correct_index) || question.correct_index < 0 || question.correct_index > 3) {
-      throw new Error('Generated correct answer index is invalid.');
-    }
-    if (!Number.isInteger(question.difficulty) || question.difficulty < 1 || question.difficulty > 5) {
-      throw new Error('Generated question difficulty is invalid.');
-    }
-  }
+  validateLessonDraft(draft);
 }
 
 function validateVerificationCaseDraft(value: GeneratedVerificationCase): void {
@@ -1878,7 +1851,7 @@ async function completeRun(
   service: ReturnType<typeof createClient>,
   runId: string,
   values: {
-    status: 'completed' | 'failed' | 'skipped';
+    status: 'completed' | 'completed_with_errors' | 'failed' | 'skipped';
     sourcesChecked: number;
     articlesDiscovered: number;
     draftsCreated: number;
@@ -1886,7 +1859,7 @@ async function completeRun(
     errorMessage?: string;
   },
 ): Promise<void> {
-  await service
+  const { error: completionError } = await service
     .from('automation_runs')
     .update({
       status: values.status,
@@ -1898,6 +1871,7 @@ async function completeRun(
       error_message: values.errorMessage ?? null,
     })
     .eq('id', runId);
+  if (completionError) throw completionError;
 }
 
 function extractFeedLink(item: JsonRecord, baseUrl: string): string {
