@@ -357,27 +357,24 @@ Deno.serve(async (req) => {
       }
     }
 
-    const staleCutoff = new Date(Date.now() - 20 * 60 * 1000).toISOString();
-    const { data: running } = await service
-      .from('automation_runs')
-      .select('id')
-      .eq('status', 'running')
-      .gte('started_at', staleCutoff)
-      .limit(1);
-    if ((running ?? []).length > 0) {
+    // Claim inside ONE database transaction. The former SELECT-then-INSERT
+    // could allow two simultaneous requests to create overlapping jobs.
+    // A null UUID means another live job already owns the global slot.
+    const { data: claimedRunId, error: claimError } = await service.rpc(
+      'claim_content_automation_run',
+      { p_trigger_mode: mode },
+    );
+    if (claimError) throw claimError;
+    if (claimedRunId === null) {
       return jsonResponse(
         { message: 'A content automation run is already in progress.' },
         202,
       );
     }
-
-    const { data: run, error: runError } = await service
-      .from('automation_runs')
-      .insert({ trigger_mode: mode, status: 'running' })
-      .select('id')
-      .single();
-    if (runError) throw runError;
-    const runId = run.id as string;
+    if (typeof claimedRunId !== 'string' || claimedRunId.length === 0) {
+      throw new Error('Content automation did not receive a valid run ID.');
+    }
+    const runId = claimedRunId;
 
     if (mode === 'manual' && target === 'verification') {
       const attemptAt = new Date().toISOString();
