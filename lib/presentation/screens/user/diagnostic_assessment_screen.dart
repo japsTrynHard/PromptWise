@@ -6,6 +6,7 @@ import '../../../data/models/adaptive_learning.dart';
 import '../../../data/models/learning_topic.dart';
 import '../../../core/routes/app_routes.dart';
 import '../../../core/utils/constants.dart';
+import '../../utils/diagnostic_submission_feedback.dart';
 import '../../widgets/adaptive_layout.dart';
 import '../../widgets/app_card.dart';
 import '../../widgets/page_intro.dart';
@@ -188,37 +189,48 @@ class _DiagnosticAssessmentScreenState
 
   Future<void> _submit() async {
     final adaptive = context.read<AdaptiveLearningController>();
+    late final DiagnosticResult result;
     try {
-      final result = await adaptive.submitDiagnostic(_answers);
-      if (!mounted) return;
-      await showDialog<void>(
-        context: context,
-        barrierDismissible: false,
-        builder: (dialogContext) => AlertDialog(
-          icon: const Icon(Icons.route_outlined),
-          title: const Text('Learning path ready'),
-          content: Text(
-            'You answered ${result.correctAnswers} of ${result.totalQuestions} questions correctly (${result.score}%). PromptWise will now prioritize weaker topics and schedule reviews as you continue learning.',
-          ),
-          actions: [
-            FilledButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: const Text('View my learning path'),
-            ),
-          ],
-        ),
-      );
-      if (!mounted) return;
-      Navigator.pushReplacementNamed(context, AppRoutes.adaptiveLearning);
+      // Take a snapshot so a subsequent screen interaction cannot alter an
+      // in-flight submission's answers.
+      result = await adaptive.submitDiagnostic(Map<String, int>.from(_answers));
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Complete every question before submitting.'),
-        ),
+        SnackBar(content: Text(diagnosticSubmissionErrorMessage(error))),
       );
+      return;
     }
+
+    if (!mounted) return;
+    // A successful local fallback is not the same as successful cloud sync.
+    // The controller provides this message when it queued an offline attempt.
+    final syncNotice = adaptive.errorMessage;
+    final syncSuffix = syncNotice == null ? '' : '\n\n$syncNotice';
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => AlertDialog(
+        icon: const Icon(Icons.route_outlined),
+        title: Text(
+          syncNotice == null ? 'Learning path ready' : 'Starting check saved',
+        ),
+        content: Text(
+          'You answered ${result.correctAnswers} of ${result.totalQuestions} questions correctly (${result.score}%). PromptWise will now prioritize weaker topics and schedule reviews as you continue learning.'
+          '$syncSuffix',
+        ),
+        actions: [
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('View my learning path'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted) return;
+    Navigator.pushReplacementNamed(context, AppRoutes.adaptiveLearning);
   }
+
 }
 
 class _DiagnosticOption extends StatelessWidget {
