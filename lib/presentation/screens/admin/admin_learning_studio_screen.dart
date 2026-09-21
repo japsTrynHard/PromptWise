@@ -480,6 +480,10 @@ class _AutomationCard extends StatelessWidget {
                   Chip(
                     label: Text('${settings.monthlyDraftCap} drafts/month cap'),
                   ),
+                  ...settings.focusTopics.map(
+                    (topic) => Chip(label: Text('Focus: ${topic.label}')),
+                  ),
+
                   Chip(
                     avatar: const Icon(Icons.inventory_2_outlined, size: 16),
                     label: Text(
@@ -495,6 +499,12 @@ class _AutomationCard extends StatelessWidget {
                   const Chip(label: Text('Auto-publish OFF')),
                 ],
               ),
+              if (settings.focusTopics.isEmpty) ...[
+                const SizedBox(height: AppSpacing.sm),
+                const Text(
+                  'No scheduled focus areas selected. Scheduled lesson generation is paused until an admin saves at least one focus area.',
+                ),
+              ],
               const SizedBox(height: AppSpacing.sm),
               Text(
                 'Queue protection: untouched AI drafts/questions auto-archive after ${queue.draftArchiveDays} days; rejected items are removed after ${queue.rejectedDeleteDays} days; archived pending AI content is removed after ${queue.archivedDeleteDays} days.',
@@ -518,7 +528,7 @@ class _AutomationCard extends StatelessWidget {
           final runAction = FilledButton.icon(
             onPressed: controller.isMutating || !settings.enabled
                 ? null
-                : controller.runNow,
+                : () => _openManualFocusDialog(context),
             icon: controller.isMutating
                 ? const SizedBox(
                     width: 18,
@@ -530,7 +540,7 @@ class _AutomationCard extends StatelessWidget {
                   )
                 : const Icon(Icons.refresh_rounded),
             label: Text(
-              controller.isMutating ? 'Checking...' : 'Check for updates now',
+              controller.isMutating ? 'Generating...' : 'Generate now (choose focus)',
             ),
           );
           final settingsAction = OutlinedButton.icon(
@@ -576,6 +586,17 @@ class _AutomationCard extends StatelessWidget {
     );
   }
 
+  Future<void> _openManualFocusDialog(BuildContext context) async {
+    final chosen = await showDialog<List<LearningTopic>>(
+      context: context,
+      builder: (dialogContext) => _ManualFocusDialog(
+        initial: controller.settings.focusTopics,
+      ),
+    );
+    if (chosen == null || !context.mounted) return;
+    await controller.runNow(chosen);
+  }
+
   Future<void> _openAutomationSettings(BuildContext context) async {
     final settings = controller.settings;
     final result = await showDialog<_AutomationSettingsValue>(
@@ -591,8 +612,80 @@ class _AutomationCard extends StatelessWidget {
       maxPendingDrafts: result.maxPendingDrafts,
       maxPendingQuestions: result.maxPendingQuestions,
       draftArchiveDays: result.draftArchiveDays,
+      focusTopics: result.focusTopics,
     );
   }
+}
+
+class _ManualFocusDialog extends StatefulWidget {
+  final List<LearningTopic> initial;
+
+  const _ManualFocusDialog({required this.initial});
+
+  @override
+  State<_ManualFocusDialog> createState() => _ManualFocusDialogState();
+}
+
+class _ManualFocusDialogState extends State<_ManualFocusDialog> {
+  late Set<LearningTopic> selected;
+
+  @override
+  void initState() {
+    super.initState();
+    selected = widget.initial.toSet();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+        title: const Text('Generate content by focus area'),
+        content: SizedBox(
+          width: 450,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Text(
+                  'Choose topics for this run only. Your saved scheduled focus areas will not change.',
+                ),
+                const SizedBox(height: AppSpacing.md),
+                ...LearningTopic.values.map((topic) => CheckboxListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(topic.label),
+                      subtitle: Text(topic.shortDescription),
+                      value: selected.contains(topic),
+                      onChanged: (checked) => setState(() {
+                        if (checked == true) {
+                          selected.add(topic);
+                        } else {
+                          selected.remove(topic);
+                        }
+                      }),
+                    )),
+                if (selected.isEmpty)
+                  const Text('Select at least one focus area.'),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: selected.isEmpty
+                ? null
+                : () => Navigator.pop(
+                      context,
+                      LearningTopic.values
+                          .where(selected.contains)
+                          .toList(growable: false),
+                    ),
+            child: const Text('Generate drafts'),
+          ),
+        ],
+      );
 }
 
 class _AutomationSettingsValue {
@@ -603,6 +696,7 @@ class _AutomationSettingsValue {
   final int maxPendingDrafts;
   final int maxPendingQuestions;
   final int draftArchiveDays;
+  final List<LearningTopic> focusTopics;
 
   const _AutomationSettingsValue({
     required this.enabled,
@@ -612,6 +706,7 @@ class _AutomationSettingsValue {
     required this.maxPendingDrafts,
     required this.maxPendingQuestions,
     required this.draftArchiveDays,
+    required this.focusTopics,
   });
 }
 
@@ -629,6 +724,8 @@ class _AutomationSettingsDialogState
     extends State<_AutomationSettingsDialog> {
   final _formKey = GlobalKey<FormState>();
   late bool _enabled;
+  late Set<LearningTopic> _focusTopics;
+  bool _showFocusError = false;
   late final TextEditingController _articles;
   late final TextEditingController _dailyDrafts;
   late final TextEditingController _monthlyDrafts;
@@ -640,6 +737,7 @@ class _AutomationSettingsDialogState
   void initState() {
     super.initState();
     _enabled = widget.settings.enabled;
+    _focusTopics = widget.settings.focusTopics.toSet();
     _articles = TextEditingController(
       text: widget.settings.maxArticlesPerRun.toString(),
     );
@@ -693,6 +791,33 @@ class _AutomationSettingsDialogState
                     'Turning this off stops new automated discovery runs. Existing published learning content is unaffected.',
                   ),
                 ),
+                const SizedBox(height: AppSpacing.md),
+                Text(
+                  'Scheduled generation focus areas',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const Text(
+                  'Select topics for scheduled AI generation. Select at least one before enabling automation.',
+                ),
+                ...LearningTopic.values.map((topic) => CheckboxListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(topic.label),
+                      subtitle: Text(topic.shortDescription),
+                      value: _focusTopics.contains(topic),
+                      onChanged: (checked) => setState(() {
+                        if (checked == true) {
+                          _focusTopics.add(topic);
+                        } else {
+                          _focusTopics.remove(topic);
+                        }
+                        _showFocusError = false;
+                      }),
+                    )),
+                if (_showFocusError)
+                  Text(
+                    'Select at least one scheduled focus area.',
+                    style: TextStyle(color: Theme.of(context).colorScheme.error),
+                  ),
                 const SizedBox(height: AppSpacing.md),
                 TextFormField(
                   controller: _articles,
@@ -787,6 +912,10 @@ class _AutomationSettingsDialogState
   void _save() {
     final form = _formKey.currentState;
     if (form == null || !form.validate()) return;
+    if (_enabled && _focusTopics.isEmpty) {
+      setState(() => _showFocusError = true);
+      return;
+    }
     Navigator.pop(
       context,
       _AutomationSettingsValue(
@@ -797,6 +926,9 @@ class _AutomationSettingsDialogState
         maxPendingDrafts: int.parse(_pendingDrafts.text.trim()),
         maxPendingQuestions: int.parse(_pendingQuestions.text.trim()),
         draftArchiveDays: int.parse(_archiveDays.text.trim()),
+        focusTopics: LearningTopic.values
+            .where(_focusTopics.contains)
+            .toList(growable: false),
       ),
     );
   }

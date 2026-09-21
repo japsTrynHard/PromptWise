@@ -47,6 +47,8 @@ class ContentController extends ChangeNotifier {
   DateTime? _lastUpdatedAt;
   int _loadGeneration = 0;
   int _reconnectAttempt = 0;
+  int _sessionEpoch = 0;
+  bool _disposed = false;
 
   List<ContentItem> get items => List.unmodifiable(_items);
   List<Module> get modules => List.unmodifiable(_modules);
@@ -72,6 +74,7 @@ class ContentController extends ChangeNotifier {
     String? userId, {
     required bool isAdministrator,
   }) async {
+    if (_disposed) return;
     if (_boundUserId == userId && _boundAsAdministrator == isAdministrator) {
       return;
     }
@@ -79,29 +82,41 @@ class ContentController extends ChangeNotifier {
     _boundUserId = userId;
     _boundAsAdministrator = isAdministrator;
     _loadGeneration++;
-
-    if (userId == null) {
-      _errorMessage = null;
-      _isLoading = false;
-      _hasLoaded = false;
-      _isLive = false;
-      _isUsingSavedContent = false;
-      _lastUpdatedAt = null;
-      _reconnectTimer?.cancel();
-      _applyItems(const []);
-      notifyListeners();
-      return;
-    }
+    _sessionEpoch++;
+    // Never reuse an administrator's draft list or pending operation when the
+    // account/role changes, even while the previous network request is running.
+    _errorMessage = null;
+    _isLoading = false;
+    _isMutating = false;
+    _hasLoaded = false;
+    _isLive = false;
+    _isUsingSavedContent = false;
+    _lastUpdatedAt = null;
+    _reconnectTimer?.cancel();
+    _reconnectAttempt = 0;
+    _applyItems(const []);
+    notifyListeners();
+    if (userId == null) return;
 
     await refresh(force: false);
   }
 
   Future<void> refresh({bool force = true}) async {
     final repository = _repository;
-    if (_boundUserId == null) return;
+    if (_disposed || _boundUserId == null || _isMutating) return;
+
+    if (!force &&
+        _hasLoaded &&
+        _isLive &&
+        _lastUpdatedAt != null &&
+        DateTime.now().difference(_lastUpdatedAt!) < _automaticRefreshTtl) {
+      return;
+    }
+    final generation = ++_loadGeneration;
 
     if (!_hasLoaded) {
       final cached = await _readCache();
+      if (generation != _loadGeneration || _disposed) return;
       if (cached.isNotEmpty) {
         _applyItems(cached);
         _hasLoaded = true;
@@ -122,15 +137,6 @@ class ContentController extends ChangeNotifier {
       return;
     }
 
-    if (!force &&
-        _hasLoaded &&
-        _isLive &&
-        _lastUpdatedAt != null &&
-        DateTime.now().difference(_lastUpdatedAt!) < _automaticRefreshTtl) {
-      return;
-    }
-
-    final generation = ++_loadGeneration;
     _isLoading = true;
     _errorMessage = null;
     notifyListeners();
@@ -151,6 +157,7 @@ class ContentController extends ChangeNotifier {
     } catch (_) {
       if (generation != _loadGeneration) return;
       final cached = _items.isNotEmpty ? _items : await _readCache();
+      if (generation != _loadGeneration || _disposed) return;
       if (cached.isNotEmpty) {
         _applyItems(cached);
         _hasLoaded = true;
@@ -182,16 +189,18 @@ class ContentController extends ChangeNotifier {
   }
 
   Future<bool> createItem(ContentItem item) async {
-    return _mutate(() async {
+    return _mutate((isCurrent) async {
       final created = await _requireRepository().createItem(item);
+      if (!isCurrent()) return;
       _upsertLocalItem(created);
       await _saveCache(_items);
     });
   }
 
   Future<bool> updateItem(ContentItem item) async {
-    return _mutate(() async {
+    return _mutate((isCurrent) async {
       final updated = await _requireRepository().updateItem(item);
+      if (!isCurrent()) return;
       _upsertLocalItem(updated);
       await _saveCache(_items);
     });
@@ -210,8 +219,12 @@ class ContentController extends ChangeNotifier {
   }
 
   Future<bool> deleteItem(ContentItem item) async {
-    return _mutate(() async {
+    return _mutate((isCurrent) async {
+      if (item.status != ContentStatus.draft) {
+        throw StateError('Only draft content can be permanently deleted.');
+      }
       await _requireRepository().deleteItem(item.id);
+      if (!isCurrent()) return;
       _removeLocalItem(item.id);
       await _saveCache(_items);
     });
@@ -227,20 +240,34 @@ class ContentController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<bool> _mutate(Future<void> Function() operation) async {
-    if (_isMutating || !_boundAsAdministrator) return false;
+  Future<bool> _mutate(
+    Future<void> Function(bool Function() isCurrent) operation,
+  ) async {
+    if (_disposed ||
+        _isMutating ||
+        !_boundAsAdministrator ||
+        _boundUserId == null) {
+      return false;
+    }
+    final epoch = _sessionEpoch;
+    bool isCurrent() => !_disposed && epoch == _sessionEpoch;
+    // An older refresh must not overwrite a just-saved item.
+    _loadGeneration++;
+    _isLoading = false;
     _isMutating = true;
     _errorMessage = null;
     notifyListeners();
     try {
-      await operation();
-      return true;
+      await operation(isCurrent);
+      return isCurrent();
     } catch (error) {
-      _errorMessage = _friendlyMessage(error);
+      if (isCurrent()) _errorMessage = _friendlyMessage(error);
       return false;
     } finally {
-      _isMutating = false;
-      notifyListeners();
+      if (isCurrent()) {
+        _isMutating = false;
+        notifyListeners();
+      }
     }
   }
 
@@ -298,10 +325,11 @@ class ContentController extends ChangeNotifier {
       _boundAsAdministrator ? _adminCacheKey : _learnerCacheKey;
 
   Future<void> _saveCache(List<ContentItem> items) async {
+    final cacheKey = _cacheKey;
     try {
       await _storage.init();
       await _storage.setString(
-        _cacheKey,
+        cacheKey,
         jsonEncode(
           items.map((item) => item.toDatabaseMap()).toList(growable: false),
         ),
@@ -312,9 +340,10 @@ class ContentController extends ChangeNotifier {
   }
 
   Future<List<ContentItem>> _readCache() async {
+    final cacheKey = _cacheKey;
     try {
       await _storage.init();
-      final raw = _storage.getString(_cacheKey);
+      final raw = _storage.getString(cacheKey);
       if (raw.isEmpty) return const [];
       final decoded = jsonDecode(raw);
       if (decoded is! List) return const [];
@@ -404,40 +433,39 @@ class ContentController extends ChangeNotifier {
         .toList(growable: false);
 
     _modules = moduleItems
-        .map(
-          (module) {
-            final moduleTopic = module.adaptiveTopic ?? inferLearningTopic([
-              module.title,
-              module.description,
-            ]);
-            return Module(
-              id: module.id,
-              title: module.title,
-              description: module.description,
-              icon: module.icon.isEmpty ? 'ai' : module.icon,
-              topic: moduleTopic,
-              lessons: lessonItems
-                  .where((lesson) => lesson.parentId == module.id)
-                  .map(
-                    (lesson) => Lesson(
-                      id: lesson.id,
-                      title: lesson.title,
-                      content: lesson.body,
-                      estimatedMinutes: lesson.estimatedMinutes,
-                      quizId: lesson.quizId ?? '',
-                      learningLevel: lesson.learningLevel,
-                      topic: lesson.adaptiveTopic ?? inferLearningTopic([
-                        lesson.title,
-                        lesson.body,
-                        module.title,
-                        module.description,
-                      ]),
-                    ),
-                  )
-                  .toList(growable: false),
-            );
-          },
-        )
+        .map((module) {
+          final moduleTopic =
+              module.adaptiveTopic ??
+              inferLearningTopic([module.title, module.description]);
+          return Module(
+            id: module.id,
+            title: module.title,
+            description: module.description,
+            icon: module.icon.isEmpty ? 'ai' : module.icon,
+            topic: moduleTopic,
+            lessons: lessonItems
+                .where((lesson) => lesson.parentId == module.id)
+                .map(
+                  (lesson) => Lesson(
+                    id: lesson.id,
+                    title: lesson.title,
+                    content: lesson.body,
+                    estimatedMinutes: lesson.estimatedMinutes,
+                    quizId: lesson.quizId ?? '',
+                    learningLevel: lesson.learningLevel,
+                    topic:
+                        lesson.adaptiveTopic ??
+                        inferLearningTopic([
+                          lesson.title,
+                          lesson.body,
+                          module.title,
+                          module.description,
+                        ]),
+                  ),
+                )
+                .toList(growable: false),
+          );
+        })
         .toList(growable: false);
 
     _activities = published
@@ -490,6 +518,9 @@ class ContentController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
+    _loadGeneration++;
+    _sessionEpoch++;
     _reconnectTimer?.cancel();
     super.dispose();
   }

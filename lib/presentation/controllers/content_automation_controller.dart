@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 
 import '../../data/models/content_automation.dart';
+import '../../data/models/learning_topic.dart';
 import '../../data/repositories/content_automation_repository.dart';
 
 class ContentAutomationController extends ChangeNotifier {
@@ -44,35 +45,31 @@ class ContentAutomationController extends ChangeNotifier {
 
   Future<void> bindAdministrator(bool isAdministrator, {String? userId}) async {
     if (_disposed) return;
+    final nextAdministrator = isAdministrator && userId != null;
+    final nextUserId = nextAdministrator ? userId : null;
     final roleChanged =
-        _isAdministrator != isAdministrator || _administratorUserId != userId;
-    _isAdministrator = isAdministrator;
-    _administratorUserId = isAdministrator ? userId : null;
-    if (roleChanged) _adminEpoch++;
+        _isAdministrator != nextAdministrator ||
+        _administratorUserId != nextUserId;
+    if (!roleChanged) return;
+    _isAdministrator = nextAdministrator;
+    _administratorUserId = nextUserId;
+    _adminEpoch++;
 
-    if (!isAdministrator) {
-      _sources = const [];
-      _drafts = const [];
-      _health = const [];
-      _questionReviewQueue = const [];
-      _approvedQuestions = const [];
-      _settings = AutomationSettings.defaults();
-      _queueHealth = QueueLifecycleStats.empty();
-      _errorMessage = null;
-      _successMessage = null;
-      _hasLoaded = false;
-      _isLoading = false;
-      _isMutating = false;
-      notifyListeners();
-      return;
-    }
-
-    if (roleChanged || !_hasLoaded) {
-      // Keep admin-only data lazy. The Learning Studio screen requests it when
-      // opened instead of adding seven Supabase reads to normal sign-in.
-      _hasLoaded = false;
-      notifyListeners();
-    }
+    // Reset pending operations and admin-only data on every identity change.
+    // A response belonging to the previous account cannot populate this one.
+    _sources = const [];
+    _drafts = const [];
+    _health = const [];
+    _questionReviewQueue = const [];
+    _approvedQuestions = const [];
+    _settings = AutomationSettings.defaults();
+    _queueHealth = QueueLifecycleStats.empty();
+    _errorMessage = null;
+    _successMessage = null;
+    _hasLoaded = false;
+    _isLoading = false;
+    _isMutating = false;
+    notifyListeners();
   }
 
   Future<void> refresh() async {
@@ -199,6 +196,7 @@ class ContentAutomationController extends ChangeNotifier {
     required int maxPendingDrafts,
     required int maxPendingQuestions,
     required int draftArchiveDays,
+    required List<LearningTopic> focusTopics,
   }) async {
     return _mutate((isCurrent) async {
       await _requireRepository().updateSettings(
@@ -209,6 +207,7 @@ class ContentAutomationController extends ChangeNotifier {
         maxPendingDrafts: maxPendingDrafts,
         maxPendingQuestions: maxPendingQuestions,
         draftArchiveDays: draftArchiveDays,
+        focusTopics: focusTopics,
       );
       if (!isCurrent()) return;
       _settings = AutomationSettings(
@@ -223,6 +222,7 @@ class ContentAutomationController extends ChangeNotifier {
         rejectedDeleteDays: _settings.rejectedDeleteDays,
         archivedDeleteDays: _settings.archivedDeleteDays,
         lastManualRunAt: _settings.lastManualRunAt,
+        focusTopics: List.unmodifiable(focusTopics),
       );
       _queueHealth = QueueLifecycleStats(
         pendingDrafts: _queueHealth.pendingDrafts,
@@ -240,12 +240,18 @@ class ContentAutomationController extends ChangeNotifier {
     });
   }
 
-  Future<bool> runNow() async {
+  Future<bool> runNow(List<LearningTopic> focusTopics) async {
     return _mutate((isCurrent) async {
-      final message = await _requireRepository().runAutomationNow();
-      if (!isCurrent()) return;
-      _successMessage = message;
-      await refresh();
+      try {
+        final message = await _requireRepository().runAutomationNow(
+          focusTopics,
+        );
+        if (!isCurrent()) return;
+        _successMessage = message;
+      } finally {
+        // A failed/partial run may still have saved drafts and used a cooldown.
+        if (isCurrent()) await refresh();
+      }
     });
   }
 

@@ -6,7 +6,9 @@ import '../../../core/routes/app_routes.dart';
 import '../../widgets/auth_shell.dart';
 
 class ForgotPasswordScreen extends StatefulWidget {
-  const ForgotPasswordScreen({super.key});
+  const ForgotPasswordScreen({super.key, this.initialError});
+
+  final String? initialError;
 
   @override
   State<ForgotPasswordScreen> createState() => _ForgotPasswordScreenState();
@@ -16,6 +18,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
   final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
   String? _sentEmail;
+  bool _showInitialError = true;
 
   @override
   void dispose() {
@@ -25,6 +28,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
+    setState(() => _showInitialError = false);
     final auth = context.read<AuthController>();
     final email = _emailController.text.trim();
     final success = await auth.sendPasswordReset(email);
@@ -35,6 +39,8 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthController>();
+    final errorMessage =
+        auth.errorMessage ?? (_showInitialError ? widget.initialError : null);
     final sentEmail = _sentEmail;
     if (sentEmail != null) {
       return AuthShell(
@@ -63,6 +69,12 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
               textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.titleSmall,
             ),
+            const SizedBox(height: 12),
+            const Text(
+              'Use only the latest reset email and open the link in the same '
+              'browser where you requested it.',
+              textAlign: TextAlign.center,
+            ),
             const SizedBox(height: 24),
             OutlinedButton.icon(
               onPressed: auth.isLoading
@@ -86,7 +98,10 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
       footer: TextButton(
         onPressed: auth.isLoading
             ? null
-            : () => Navigator.pushReplacementNamed(context, AppRoutes.login),
+            : () {
+                auth.clearError();
+                Navigator.pushReplacementNamed(context, AppRoutes.login);
+              },
         child: const Text('Back to sign in'),
       ),
       child: Form(
@@ -94,8 +109,8 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            if (auth.errorMessage != null) ...[
-              _Status(message: auth.errorMessage!, isError: true),
+            if (errorMessage != null) ...[
+              _Status(message: errorMessage, isError: true),
               const SizedBox(height: 16),
             ],
             TextFormField(

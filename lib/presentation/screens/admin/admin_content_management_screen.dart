@@ -27,6 +27,14 @@ class _AdminContentManagementScreenState
   ContentStatus? _statusFilter;
 
   @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) context.read<ContentController>().refresh();
+    });
+  }
+
+  @override
   void dispose() {
     _searchController.dispose();
     super.dispose();
@@ -105,7 +113,9 @@ class _AdminContentManagementScreenState
                       setState(() => _statusFilter = value);
                     },
                     onCreate: content.isMutating ? null : () => _openEditor(),
-                    onRefresh: content.isLoading ? null : content.refresh,
+                    onRefresh: content.isLoading || content.isMutating
+                        ? null
+                        : content.refresh,
                   ),
 
                   const SizedBox(height: AppSpacing.xl),

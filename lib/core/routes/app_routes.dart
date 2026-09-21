@@ -7,6 +7,7 @@ import '../../data/models/awareness_filter.dart';
 import '../../data/models/lesson.dart';
 import '../../data/models/quiz.dart';
 import '../utils/constants.dart';
+import 'auth_callback.dart';
 import '../../presentation/screens/user/adaptive_knowledge_check_screen.dart';
 import '../../presentation/screens/user/adaptive_learning_screen.dart';
 import '../../presentation/screens/admin/admin_dashboard_screen.dart';
@@ -58,7 +59,26 @@ class AppRoutes {
   static const String verificationSession = '/verification-session';
   static const String admin = '/admin';
 
+  static String initialRouteForUri(Uri uri) =>
+      AuthCallback.parse(uri.toString()).isAuthCallback ? uri.toString() : root;
+
   static Route<dynamic> generateRoute(RouteSettings settings) {
+    final callback = AuthCallback.parse(settings.name ?? root);
+    // Keep auth tokens and errors out of the navigator's route names.
+    settings = RouteSettings(
+      name: callback.hasError
+          ? forgotPassword
+          : callback.isAuthCallback
+          ? root
+          : callback.path,
+      arguments: settings.arguments,
+    );
+    if (callback.hasError) {
+      return _page(
+        settings,
+        ForgotPasswordScreen(initialError: callback.errorMessage),
+      );
+    }
     switch (settings.name) {
       case root:
         return _page(settings, const AuthGateScreen(), fadeOnly: true);
@@ -81,7 +101,14 @@ class AppRoutes {
           VerifyEmailScreen(request: value is AuthOtpRequest ? value : null),
         );
       case forgotPassword:
-        return _page(settings, const ForgotPasswordScreen());
+        return _page(
+          settings,
+          ForgotPasswordScreen(
+            initialError: settings.arguments is String
+                ? settings.arguments as String
+                : null,
+          ),
+        );
       case resetPassword:
         return _page(settings, const ResetPasswordScreen());
       case dashboard:

@@ -10,7 +10,11 @@ class ContentRepository {
   Future<List<ContentItem>> fetchItems({
     required bool includeUnpublished,
   }) async {
-    dynamic query = _client.from('content_items').select('id,content_type,parent_id,title,description,body,icon,estimated_minutes,quiz_id,question,options,correct_index,explanation,image_path_a,image_path_b,is_a_ai,sort_order,learning_level,adaptive_topic,status,version,source_url,publication_date,review_date,created_at,updated_at');
+    dynamic query = _client
+        .from('content_items')
+        .select(
+          'id,content_type,parent_id,title,description,body,icon,estimated_minutes,quiz_id,question,options,correct_index,explanation,image_path_a,image_path_b,is_a_ai,sort_order,learning_level,adaptive_topic,status,version,source_url,publication_date,review_date,created_at,updated_at',
+        );
     if (!includeUnpublished) {
       query = query.eq('status', ContentStatus.published.databaseValue);
     }
@@ -24,7 +28,9 @@ class ContentRepository {
     final response = await _client
         .from('content_items')
         .insert(item.toDatabaseMap())
-        .select('id,content_type,parent_id,title,description,body,icon,estimated_minutes,quiz_id,question,options,correct_index,explanation,image_path_a,image_path_b,is_a_ai,sort_order,learning_level,adaptive_topic,status,version,source_url,publication_date,review_date,created_at,updated_at')
+        .select(
+          'id,content_type,parent_id,title,description,body,icon,estimated_minutes,quiz_id,question,options,correct_index,explanation,image_path_a,image_path_b,is_a_ai,sort_order,learning_level,adaptive_topic,status,version,source_url,publication_date,review_date,created_at,updated_at',
+        )
         .single();
     return ContentItem.fromMap(Map<String, dynamic>.from(response));
   }
@@ -34,13 +40,21 @@ class ContentRepository {
         .from('content_items')
         .update(item.toDatabaseMap(includeId: false))
         .eq('id', item.id)
-        .select('id,content_type,parent_id,title,description,body,icon,estimated_minutes,quiz_id,question,options,correct_index,explanation,image_path_a,image_path_b,is_a_ai,sort_order,learning_level,adaptive_topic,status,version,source_url,publication_date,review_date,created_at,updated_at')
+        .select(
+          'id,content_type,parent_id,title,description,body,icon,estimated_minutes,quiz_id,question,options,correct_index,explanation,image_path_a,image_path_b,is_a_ai,sort_order,learning_level,adaptive_topic,status,version,source_url,publication_date,review_date,created_at,updated_at',
+        )
         .single();
     return ContentItem.fromMap(Map<String, dynamic>.from(response));
   }
 
   Future<void> deleteItem(String id) async {
-    await _client.from('content_items').delete().eq('id', id);
+    await _client
+        .from('content_items')
+        .delete()
+        .eq('id', id)
+        .eq('status', ContentStatus.draft.databaseValue)
+        .select('id')
+        .single();
   }
 
   Future<List<ContentVersion>> fetchVersions(String contentId) async {

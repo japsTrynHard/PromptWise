@@ -1,6 +1,9 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { XMLParser } from 'npm:fast-xml-parser@4.5.3';
 import { classifyRun, queueIsFull, validateLessonDraft } from './quality.mjs';
+import {
+  enforceDraftFocus, resolveFocusTopics, selectCandidateFocus, textSupportsFocus,
+} from './focus.mjs';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -203,6 +206,30 @@ Deno.serve(async (req) => {
       .eq('id', 1)
       .single();
     if (settingsError) throw settingsError;
+
+    // Only authorized admins may supply one-run overrides. Scheduled requests
+    // MUST read the saved focus list and ignore any caller-provided override.
+    let focusTopics: string[] | null;
+    try {
+      focusTopics = resolveFocusTopics({
+        mode,
+        target,
+        savedTopics: settings.focus_topics,
+        requestedTopics: body.focus_topics,
+      }) as string[] | null;
+    } catch (error) {
+      throw new HttpError(mode === 'manual' ? 400 : 500, errorMessage(error));
+    }
+    if (target !== 'verification' && focusTopics?.length === 0) {
+      const message = 'Scheduled lesson generation paused: no administrator focus areas are configured. Open Learning Studio > Automation settings and save at least one topic.';
+      await service.from('automation_runs').insert({
+        trigger_mode: mode,
+        status: 'skipped',
+        completed_at: new Date().toISOString(),
+        error_message: message,
+      });
+      return jsonResponse({ message, focusTopics: [], focusPaused: true });
+    }
 
 
     // Keep unattended queues bounded before every run. The same cleanup also
@@ -627,19 +654,33 @@ Deno.serve(async (req) => {
         }
       }
 
-      const dedupedCandidates = dedupeCandidates(candidates)
-        .sort((a, b) => b.relevanceScore - a.relevanceScore)
+      // Filter BEFORE limiting candidates: unrelated trending AI news must
+      // never crowd out sources for the admin-selected curricular skill.
+      const focusedCandidates = dedupeCandidates(candidates)
+        .map((candidate) => ({
+          candidate,
+          focusTopic: selectCandidateFocus(candidate, focusTopics!),
+        }))
+        .filter((entry): entry is { candidate: Candidate; focusTopic: string } =>
+          entry.focusTopic !== null)
+        .sort((a, b) => b.candidate.relevanceScore - a.candidate.relevanceScore)
         .slice(0, Math.max(1, Number(settings.max_articles_per_run ?? 3) * 3));
+
 
       let articlesDiscovered = 0;
       let draftsCreated = 0;
       let verificationDraftsCreated = 0;
       let processingFailures = 0;
       const maxArticles = Math.max(1, Number(settings.max_articles_per_run ?? 3));
-      const groqModels = await resolveGroqModels(groqApiKey);
-      console.log('Groq models available to this project:', groqModels.join(', '));
+      // No matched source means no Groq request and no random fallback topic.
+      const groqModels = focusedCandidates.length > 0
+        ? await resolveGroqModels(groqApiKey)
+        : [];
+      if (groqModels.length > 0) {
+        console.log('Groq models available to this project:', groqModels.join(', '));
+      }
 
-      for (const candidate of dedupedCandidates) {
+      for (const { candidate, focusTopic } of focusedCandidates) {
         if (articlesDiscovered >= maxArticles || draftsCreated >= draftBudget) {
           break;
         }
@@ -694,14 +735,23 @@ Deno.serve(async (req) => {
             await markArticle(service, article.id, 'ignored');
             continue;
           }
+          if (!textSupportsFocus(articleText, focusTopic)) {
+            // The feed headline matched, but the underlying source cannot
+            // support a lesson about the selected skill. Never ask the AI to
+            // invent a connection; keep it retryable for source corrections.
+            await markArticle(service, article.id, 'failed');
+            continue;
+          }
 
           const draft = await generateDraft({
             apiKey: groqApiKey,
             models: groqModels,
             candidate,
             articleText,
+            focusTopic,
           });
           validateDraft(draft);
+          enforceDraftFocus(draft, focusTopic);
 
           const { error: draftError } = await service
             .from('generated_content_drafts')
@@ -788,8 +838,10 @@ Deno.serve(async (req) => {
         : runFailed
           ? `Content generation failed; no lesson drafts were created. ${diagnostic} Check Edge Function logs.`
           : draftsCreated > 0
-            ? `Content check completed. ${draftsCreated} lesson draft${draftsCreated === 1 ? '' : 's'} and ${verificationDraftsCreated} verification case draft${verificationDraftsCreated === 1 ? '' : 's'} created from trusted sources.`
-            : 'Content check completed. No new relevant, non-duplicate draft was needed.';
+            ? `Content check completed for ${focusTopics!.join(', ')}. ${draftsCreated} lesson draft${draftsCreated === 1 ? '' : 's'} and ${verificationDraftsCreated} verification case draft${verificationDraftsCreated === 1 ? '' : 's'} created from trusted sources.`
+            : focusedCandidates.length === 0
+              ? 'No eligible trusted source matches the selected focus areas. No unrelated content was generated.'
+              : 'No new, non-duplicate source produced a draft for the selected focus areas.';
 
       return jsonResponse({
         message,
@@ -803,6 +855,8 @@ Deno.serve(async (req) => {
         draftsCreated,
         processingFailures,
         verificationDraftsCreated,
+        focusTopics,
+        matchingCandidates: focusedCandidates.length,
       }, runFailed ? 502 : 200);
     } catch (error) {
       await completeRun(service, runId, {
@@ -1576,11 +1630,13 @@ async function generateDraft({
   models,
   candidate,
   articleText,
+  focusTopic,
 }: {
   apiKey: string;
   models: string[];
   candidate: Candidate;
   articleText: string;
+  focusTopic: string;
 }): Promise<GeneratedDraftPayload> {
   const basePrompt = `You are the curriculum drafting engine for PromptWise, an AI-literacy learning system.
 
@@ -1589,6 +1645,12 @@ SOURCE RULES:
 - Do not invent statistics, dates, policies, quotations, or events.
 - The source is input for a DRAFT only; a human administrator must review it.
 - Build durable AI-literacy instruction around the source instead of merely summarizing news.
+
+ADMIN-SELECTED FOCUS AREA (MANDATORY): ${focusTopic}
+- Produce a lesson specifically teaching this ONE selected AI-literacy skill.
+- topic_id MUST be exactly ${focusTopic}. Never substitute another topic.
+- Ground the lesson in source material relevant to this focus. If insufficient,
+  do not fabricate relevant facts or shift to a different curricular skill.
 
 LEARNING DESIGN RULES:
 - Valid topic_id values: prompt_clarity, context, specificity, responsible_use, verification.
@@ -1606,7 +1668,7 @@ Return STRICT JSON only with this exact shape:
 {
   "title": "...",
   "summary": "...",
-  "topic_id": "verification",
+  "topic_id": "${focusTopic}",
   "target_level": 3,
   "objectives": [
     {"title":"...", "description":"..."}
@@ -1732,6 +1794,7 @@ A previous generation attempt failed PromptWise validation. Make this response f
 
       const draft = parseJsonObject(content) as unknown as GeneratedDraftPayload;
       validateDraft(draft);
+      enforceDraftFocus(draft, focusTopic);
       console.log(`Groq draft generation succeeded with model: ${model}`);
       return draft;
     } catch (error) {

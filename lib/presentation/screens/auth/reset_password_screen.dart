@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../../controllers/auth_controller.dart';
 import '../../../core/routes/app_routes.dart';
+import '../../../core/routes/auth_callback.dart';
 import '../../widgets/auth_shell.dart';
 
 class ResetPasswordScreen extends StatefulWidget {
@@ -42,6 +43,20 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthController>();
+    if (!auth.isPasswordRecovery) {
+      return AuthShell(
+        title: 'Request a new reset link',
+        description:
+            auth.authLinkErrorMessage ?? AuthCallback.expiredLinkMessage,
+        child: FilledButton(
+          onPressed: () {
+            auth.clearError();
+            Navigator.pushReplacementNamed(context, AppRoutes.forgotPassword);
+          },
+          child: const Text('Send a new reset link'),
+        ),
+      );
+    }
     return AuthShell(
       title: 'Choose a new password',
       description:

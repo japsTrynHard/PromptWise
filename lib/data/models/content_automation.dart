@@ -45,6 +45,8 @@ class AutomationSettings {
   final int rejectedDeleteDays;
   final int archivedDeleteDays;
   final DateTime? lastManualRunAt;
+  /// Saved focus areas for scheduled lesson generation. Empty means not configured.
+  final List<LearningTopic> focusTopics;
 
   const AutomationSettings({
     required this.enabled,
@@ -58,6 +60,7 @@ class AutomationSettings {
     required this.rejectedDeleteDays,
     required this.archivedDeleteDays,
     this.lastManualRunAt,
+    this.focusTopics = const [],
   });
 
   factory AutomationSettings.defaults() => const AutomationSettings(
@@ -113,6 +116,12 @@ class AutomationSettings {
           fallback: 90,
         ).clamp(30, 365),
         lastManualRunAt: _asDate(map['last_manual_run_at']),
+        focusTopics: List<LearningTopic>.unmodifiable(
+          ((map['focus_topics'] is List) ? map['focus_topics'] as List : const [])
+              .map((item) => LearningTopicX.fromId(item.toString()))
+              .whereType<LearningTopic>()
+              .toSet(),
+        ),
       );
 }
 

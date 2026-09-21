@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../core/routes/auth_callback.dart';
 import '../../data/models/app_profile.dart';
 import '../../data/repositories/auth_repository.dart';
 import '../../data/services/storage_service.dart';
@@ -32,6 +33,7 @@ class AuthController extends ChangeNotifier {
   bool _hasPendingSignupConfirmation = false;
   String? _pendingEmail;
   String? _errorMessage;
+  String? _authLinkErrorMessage;
   List<AppProfile>? _allProfilesCache;
   DateTime? _allProfilesCacheAt;
 
@@ -53,6 +55,7 @@ class AuthController extends ChangeNotifier {
           !isEmailVerified ||
           (!_isProfileLoading && _profile != null));
   String? get errorMessage => _errorMessage;
+  String? get authLinkErrorMessage => _authLinkErrorMessage;
   String? get pendingEmail => _pendingEmail;
   bool get hasPendingSignupVerification =>
       _hasPendingSignupConfirmation &&
@@ -105,7 +108,9 @@ class AuthController extends ChangeNotifier {
     _authSubscription = repository.authStateChanges.listen(
       handleAuthState,
       onError: (Object error, StackTrace stackTrace) {
-        _errorMessage = _friendlyMessage(error);
+        _authLinkErrorMessage = AuthCallback.messageForException(error);
+        if (_authLinkErrorMessage != null) _isPasswordRecovery = false;
+        _errorMessage = _authLinkErrorMessage ?? _friendlyMessage(error);
         _notifyListeners();
       },
     );
@@ -129,6 +134,13 @@ class AuthController extends ChangeNotifier {
 
     if (state.event == AuthChangeEvent.passwordRecovery) {
       _isPasswordRecovery = true;
+      _authLinkErrorMessage = null;
+      _errorMessage = null;
+    }
+    if (state.event == AuthChangeEvent.signedIn ||
+        state.event == AuthChangeEvent.signedOut) {
+      if (_authLinkErrorMessage != null) _errorMessage = null;
+      _authLinkErrorMessage = null;
     }
 
     if (state.event == AuthChangeEvent.signedOut || state.session == null) {
@@ -320,6 +332,7 @@ class AuthController extends ChangeNotifier {
     _pendingEmail = targetEmail;
     return _run(() async {
       await repository.sendPasswordReset(targetEmail);
+      _authLinkErrorMessage = null;
     });
   }
 
@@ -384,14 +397,16 @@ class AuthController extends ChangeNotifier {
       _allProfilesCache = null;
       _allProfilesCacheAt = null;
       _isPasswordRecovery = false;
+      _authLinkErrorMessage = null;
       _hasPendingSignupConfirmation = false;
       await _clearPendingSignupEmail();
     });
   }
 
   void clearError() {
-    if (_errorMessage == null) return;
+    if (_errorMessage == null && _authLinkErrorMessage == null) return;
     _errorMessage = null;
+    _authLinkErrorMessage = null;
     _notifyListeners();
   }
 

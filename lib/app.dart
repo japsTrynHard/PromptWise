@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import './presentation/controllers/auth_controller.dart';
 import './presentation/controllers/theme_controller.dart';
 import './core/routes/app_routes.dart';
+import './core/routes/auth_callback_url.dart';
 import './core/theme/app_theme.dart';
 import './core/utils/constants.dart';
 
@@ -16,7 +17,37 @@ class PromptWiseApp extends StatefulWidget {
 
 class _PromptWiseAppState extends State<PromptWiseApp> {
   final _navigatorKey = GlobalKey<NavigatorState>();
+  late final String _initialRoute;
   bool _recoveryRouteScheduled = false;
+  String? _scheduledLinkError;
+
+  @override
+  void initState() {
+    super.initState();
+    final uri = Uri.base;
+    _initialRoute = AppRoutes.initialRouteForUri(uri);
+    clearFailedAuthCallbackUrl(uri);
+  }
+
+  void _syncAuthLinkError(String? message) {
+    if (message == null) {
+      _scheduledLinkError = null;
+      return;
+    }
+    if (_scheduledLinkError == message) return;
+    _scheduledLinkError = message;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted ||
+          context.read<AuthController>().authLinkErrorMessage != message) {
+        return;
+      }
+      _navigatorKey.currentState?.pushNamedAndRemoveUntil(
+        AppRoutes.forgotPassword,
+        (_) => false,
+        arguments: message,
+      );
+    });
+  }
 
   void _syncPasswordRecoveryRoute(bool isPasswordRecovery) {
     if (!isPasswordRecovery) {
@@ -45,8 +76,9 @@ class _PromptWiseAppState extends State<PromptWiseApp> {
   @override
   Widget build(BuildContext context) {
     final themeMode = context.watch<ThemeController>().themeMode;
-    final passwordRecovery = context.watch<AuthController>().isPasswordRecovery;
-    _syncPasswordRecoveryRoute(passwordRecovery);
+    final auth = context.watch<AuthController>();
+    _syncPasswordRecoveryRoute(auth.isPasswordRecovery);
+    _syncAuthLinkError(auth.authLinkErrorMessage);
 
     return MaterialApp(
       navigatorKey: _navigatorKey,
@@ -57,7 +89,7 @@ class _PromptWiseAppState extends State<PromptWiseApp> {
       themeMode: themeMode,
       themeAnimationDuration: AppMotion.normal,
       themeAnimationCurve: AppMotion.standardCurve,
-      initialRoute: AppRoutes.root,
+      initialRoute: _initialRoute,
       onGenerateRoute: AppRoutes.generateRoute,
       builder: (context, child) {
         final content = child ?? const SizedBox.shrink();
