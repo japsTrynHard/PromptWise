@@ -1,6 +1,9 @@
 name: promptwise
+
 description: "Master AI Prompts & Detect Misinformation – Flutter educational app."
+
 publish_to: "none"
+
 version: 1.0.0+1
 
 environment:
@@ -9,16 +12,19 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+
   provider: ^6.1.5+1
   shared_preferences: ^2.5.5
   google_fonts: ^8.2.0
   supabase_flutter: 2.16.0
   http: ^1.6.0
   url_launcher: ^6.3.2
+  video_player: ^2.11.1
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
+
   flutter_lints: ^5.0.0
   flutter_launcher_icons: ^0.14.4
 
@@ -28,6 +34,7 @@ flutter:
   assets:
     - assets/images/
     - assets/branding/
+    - assets/videos/promptwise_awareness.mp4
 
 flutter_launcher_icons:
   android: "launcher_icon"

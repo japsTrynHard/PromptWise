@@ -3,11 +3,15 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../controllers/auth_controller.dart';
+import '../../controllers/onboarding_controller.dart';
+import '../../controllers/learning_survey_controller.dart';
 import '../../../core/routes/app_routes.dart';
 import '../../../core/utils/constants.dart';
 import '../../widgets/app_logo.dart';
 import '../admin/admin_dashboard_screen.dart';
 import '../user/dashboard_screen.dart';
+import '../user/onboarding_orientation_screen.dart';
+import '../user/learning_survey_screen.dart';
 import '../shared/welcome_screen.dart';
 import 'signup_confirmation_screen.dart';
 
@@ -62,14 +66,22 @@ class AuthGateScreen extends StatelessWidget {
       );
     }
 
-    return const DashboardScreen();
+    return _LearnerOrientationGate(
+      userId: auth.userId,
+      child: const DashboardScreen(),
+    );
   }
 }
 
 class AuthenticatedRoute extends StatelessWidget {
   final Widget child;
+  final bool requireOrientation;
 
-  const AuthenticatedRoute({super.key, required this.child});
+  const AuthenticatedRoute({
+    super.key,
+    required this.child,
+    this.requireOrientation = true,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -106,6 +118,55 @@ class AuthenticatedRoute extends StatelessWidget {
             ? () => Navigator.pushReplacementNamed(context, AppRoutes.admin)
             : () => auth.signOut(),
       );
+    }
+    if (!requireOrientation) return child;
+    return _LearnerOrientationGate(userId: auth.userId, child: child);
+  }
+}
+
+class _LearnerOrientationGate extends StatelessWidget {
+  final String? userId;
+  final Widget child;
+
+  const _LearnerOrientationGate({required this.userId, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    final onboarding = context.watch<OnboardingController>();
+    if (!onboarding.isReadyFor(userId)) {
+      // A failed save should stay on the orientation screen and allow retry.
+      // Only a failed initial fetch blocks entry to guarded learner routes.
+      if (onboarding.activeUserId == userId &&
+          onboarding.errorMessage != null) {
+        return _GateMessage(
+          icon: Icons.cloud_off_outlined,
+          title: 'Orientation unavailable',
+          message: onboarding.errorMessage!,
+          primaryLabel: 'Retry',
+          onPrimary: () => onboarding.retry(),
+          secondaryLabel: 'Sign out',
+          onSecondary: () => context.read<AuthController>().signOut(),
+        );
+      }
+      return const _GateLoading(message: 'Checking orientation progress...');
+    }
+    if (!onboarding.orientationComplete) {
+      return const OnboardingOrientationScreen();
+    }
+    if (!onboarding.surveyReady) {
+      final survey = context.watch<LearningSurveyController>();
+      if (!survey.isReadyFor(userId) && survey.errorMessage != null) {
+        return _GateMessage(
+          icon: Icons.cloud_off_outlined,
+          title: 'Learning preferences unavailable',
+          message: survey.errorMessage!,
+          primaryLabel: 'Retry',
+          onPrimary: () => survey.retry(),
+          secondaryLabel: 'Sign out',
+          onSecondary: () => context.read<AuthController>().signOut(),
+        );
+      }
+      return const LearningSurveyScreen();
     }
     return child;
   }

@@ -19,6 +19,8 @@ import '../../presentation/screens/auth/signup_confirmation_screen.dart';
 import '../../presentation/screens/auth/verify_email_screen.dart';
 import '../../presentation/screens/user/dashboard_screen.dart';
 import '../../presentation/screens/user/diagnostic_assessment_screen.dart';
+import '../../presentation/screens/user/onboarding_orientation_screen.dart';
+import '../../presentation/screens/user/learning_survey_screen.dart';
 import '../../presentation/screens/user/image_compare_screen.dart';
 import '../../presentation/screens/user/lesson_detail_screen.dart';
 import '../../presentation/screens/user/module_list_screen.dart';
@@ -51,6 +53,8 @@ class AppRoutes {
   static const String adaptiveLearning = '/adaptive-learning';
   static const String adaptiveKnowledgeCheck = '/adaptive-knowledge-check';
   static const String diagnostic = '/diagnostic';
+  static const String orientation = '/orientation';
+  static const String learningSurvey = '/learning-survey';
   static const String verificationSession = '/verification-session';
   static const String admin = '/admin';
 
@@ -119,6 +123,19 @@ class AppRoutes {
             ),
           ),
         );
+      case orientation:
+        return _page(
+          settings,
+          const AuthenticatedRoute(
+            requireOrientation: false,
+            child: OnboardingOrientationScreen(replay: true),
+          ),
+        );
+      case learningSurvey:
+        return _page(settings, const AuthenticatedRoute(
+          requireOrientation: false,
+          child: LearningSurveyScreen(replay: true),
+        ));
       case diagnostic:
         return _page(
           settings,

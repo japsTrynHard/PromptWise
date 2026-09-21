@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../controllers/adaptive_learning_controller.dart';
+import '../../controllers/learning_survey_controller.dart';
+import '../../../data/services/personalized_recommendation.dart';
 import '../../controllers/content_controller.dart';
 import '../../controllers/learning_progression_controller.dart';
 import '../../controllers/progress_controller.dart';
@@ -42,7 +44,16 @@ class _AdaptiveLearningScreenState extends State<AdaptiveLearningScreen> {
     final content = context.watch<ContentController>();
     final progress = context.watch<ProgressController>();
     final progression = context.watch<LearningProgressionController>();
-    final recommendedTopic = adaptive.recommendedTopic;
+    final survey = context.watch<LearningSurveyController>();
+    final recommendationInfo = choosePersonalizedRecommendation(
+      survey: survey.survey,
+      mastery: adaptive.mastery,
+      dueReviews: adaptive.dueReviews,
+      diagnosticCompleted: adaptive.diagnosticCompleted,
+      fallbackTopic: adaptive.recommendedTopic,
+      fallbackReason: adaptive.recommendationReason,
+    );
+    final recommendedTopic = recommendationInfo.topic;
     final recommendedContent = recommendedTopic == null
         ? null
         : _findRecommendation(
@@ -109,6 +120,7 @@ class _AdaptiveLearningScreenState extends State<AdaptiveLearningScreen> {
                     _OverviewCard(
                       adaptive: adaptive,
                       progression: progression,
+                      suggestionReason: recommendationInfo.reason,
                     ),
                     if (!adaptive.diagnosticCompleted) ...[
                       const SizedBox(height: AppSpacing.lg),
@@ -146,6 +158,8 @@ class _AdaptiveLearningScreenState extends State<AdaptiveLearningScreen> {
                       adaptive: adaptive,
                       progression: progression,
                       recommendation: recommendedContent,
+                      suggestedTopic: recommendedTopic,
+                      suggestionReason: recommendationInfo.reason,
                     ),
                     if (adaptive.dueReviews.isNotEmpty) ...[
                       const SizedBox(height: AppSpacing.section),
@@ -263,10 +277,12 @@ class _AdaptiveLearningScreenState extends State<AdaptiveLearningScreen> {
 class _OverviewCard extends StatelessWidget {
   final AdaptiveLearningController adaptive;
   final LearningProgressionController progression;
+  final String suggestionReason;
 
   const _OverviewCard({
     required this.adaptive,
     required this.progression,
+    required this.suggestionReason,
   });
 
   @override
@@ -333,7 +349,7 @@ class _OverviewCard extends StatelessWidget {
               const SizedBox(height: AppSpacing.sm),
               _StatusLine(
                 icon: Icons.route_outlined,
-                text: adaptive.recommendationReason,
+                text: suggestionReason,
               ),
             ],
           );
@@ -507,11 +523,15 @@ class _RecommendationCard extends StatelessWidget {
   final AdaptiveLearningController adaptive;
   final LearningProgressionController progression;
   final _AdaptiveRecommendation? recommendation;
+  final LearningTopic? suggestedTopic;
+  final String suggestionReason;
 
   const _RecommendationCard({
     required this.adaptive,
     required this.progression,
     required this.recommendation,
+    required this.suggestedTopic,
+    required this.suggestionReason,
   });
 
   @override
@@ -531,7 +551,7 @@ class _RecommendationCard extends StatelessWidget {
       );
     }
 
-    final topic = adaptive.recommendedTopic ?? adaptive.weakestTopic;
+    final topic = suggestedTopic ?? adaptive.weakestTopic;
     if (topic == null) {
       return AppCard(
         child: const Text(
@@ -586,7 +606,7 @@ class _RecommendationCard extends StatelessWidget {
           Text(
             isDue
                 ? 'Your spaced review is due. PromptWise will select fresh questions around this competency and adjust their difficulty to your current rank.'
-                : '${topic.label} is the area that needs the most practice right now. Start a focused set instead of repeating one fixed quiz.',
+                : '$suggestionReason Start a focused set instead of repeating one fixed quiz.',
             style: Theme.of(context).textTheme.bodyLarge?.copyWith(height: 1.5),
           ),
           const SizedBox(height: AppSpacing.lg),

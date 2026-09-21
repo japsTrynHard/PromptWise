@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../controllers/adaptive_learning_controller.dart';
+import '../../controllers/learning_survey_controller.dart';
+import '../../../data/services/personalized_recommendation.dart';
 import '../../controllers/auth_controller.dart';
 import '../../controllers/progress_controller.dart';
 import '../../controllers/theme_controller.dart';
@@ -23,6 +25,15 @@ class ProfileScreen extends StatelessWidget {
     final adaptive = context.watch<AdaptiveLearningController>();
     final auth = context.watch<AuthController>();
     final progress = progressController.progress;
+    final survey = context.watch<LearningSurveyController>();
+    final personalized = choosePersonalizedRecommendation(
+      survey: survey.survey,
+      mastery: adaptive.mastery,
+      dueReviews: adaptive.dueReviews,
+      diagnosticCompleted: adaptive.diagnosticCompleted,
+      fallbackTopic: adaptive.recommendedTopic,
+      fallbackReason: adaptive.recommendationReason,
+    );
 
     return AdaptiveBody(
       safeTop: false,
@@ -58,18 +69,44 @@ class ProfileScreen extends StatelessWidget {
                 const SizedBox(height: AppSpacing.md),
                 AppCard(
                   padding: EdgeInsets.zero,
-                  child: _SettingsTile(
-                    icon: Icons.route_outlined,
-                    title: adaptive.diagnosticCompleted
-                        ? 'Learning progress: ${adaptive.overallMastery}%'
-                        : 'Set up your learning path',
-                    subtitle: adaptive.diagnosticCompleted
-                        ? '${adaptive.recommendationReason} Review topic progress and upcoming reviews.'
-                        : 'Take the five-question starting check to get personalized recommendations.',
-                    onTap: () => Navigator.pushNamed(
-                      context,
-                      AppRoutes.adaptiveLearning,
-                    ),
+                  child: Column(
+                    children: [
+                      _SettingsTile(
+                        icon: Icons.route_outlined,
+                        title: adaptive.diagnosticCompleted
+                            ? 'Learning progress: ${adaptive.overallMastery}%'
+                            : 'Set up your learning path',
+                        subtitle: adaptive.diagnosticCompleted
+                            ? '${personalized.reason} Review topic progress and upcoming reviews.'
+                            : 'Take the five-question starting check to get personalized recommendations.',
+                        onTap: () => Navigator.pushNamed(
+                          context,
+                          AppRoutes.adaptiveLearning,
+                        ),
+                      ),
+                      const Divider(height: 1),
+                      _SettingsTile(
+                        icon: Icons.tune_rounded,
+                        title: 'Learning interests and goals',
+                        subtitle: survey.survey == null
+                            ? 'Choose your interests and prior AI experience.'
+                            : 'Update your preferences and personalized suggestions.',
+                        onTap: () => Navigator.pushNamed(
+                          context,
+                          AppRoutes.learningSurvey,
+                        ),
+                      ),
+                      const Divider(height: 1),
+                      _SettingsTile(
+                        icon: Icons.ondemand_video_outlined,
+                        title: 'Replay the introduction',
+                        subtitle: 'Watch the awareness video or read its transcript.',
+                        onTap: () => Navigator.pushNamed(
+                          context,
+                          AppRoutes.orientation,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
                 const SizedBox(height: AppSpacing.section),

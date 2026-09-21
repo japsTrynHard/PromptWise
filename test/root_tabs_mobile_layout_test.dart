@@ -5,6 +5,9 @@ import 'package:promptwise/presentation/controllers/auth_controller.dart';
 import 'package:promptwise/presentation/controllers/awareness_feed_controller.dart';
 import 'package:promptwise/presentation/controllers/content_controller.dart';
 import 'package:promptwise/presentation/controllers/learning_progression_controller.dart';
+import 'package:promptwise/presentation/controllers/learning_survey_controller.dart';
+import 'package:promptwise/data/repositories/learning_survey_repository.dart';
+import 'package:promptwise/data/models/learning_survey.dart';
 import 'package:promptwise/presentation/controllers/progress_controller.dart';
 import 'package:promptwise/presentation/controllers/theme_controller.dart';
 import 'package:promptwise/presentation/screens/user/home_screen.dart';
@@ -75,6 +78,9 @@ Future<void> _pumpRootTab(
   final adaptive = AdaptiveLearningController();
   final progression = LearningProgressionController();
   final theme = ThemeController();
+  final survey = LearningSurveyController(
+    repository: _FakeLearningSurveyGateway(),
+  );
   addTearDown(auth.dispose);
   addTearDown(awareness.dispose);
   addTearDown(content.dispose);
@@ -82,6 +88,7 @@ Future<void> _pumpRootTab(
   addTearDown(adaptive.dispose);
   addTearDown(progression.dispose);
   addTearDown(theme.dispose);
+  addTearDown(survey.dispose);
 
   await tester.pumpWidget(
     MultiProvider(
@@ -93,6 +100,7 @@ Future<void> _pumpRootTab(
         ChangeNotifierProvider.value(value: adaptive),
         ChangeNotifierProvider.value(value: progression),
         ChangeNotifierProvider.value(value: theme),
+        ChangeNotifierProvider.value(value: survey),
       ],
       child: MaterialApp(home: scaffold ? Scaffold(body: screen) : screen),
     ),
@@ -107,4 +115,14 @@ Future<void> _scrollTo(WidgetTester tester, Finder finder) async {
     scrollable: find.byType(Scrollable).first,
   );
   await tester.pump();
+}
+
+// Widget tests use an in-memory gateway, never live Supabase credentials.
+class _FakeLearningSurveyGateway implements LearningSurveyGateway {
+  @override
+  Future<LearningSurvey?> fetch(String userId) async => null;
+
+  @override
+  Future<LearningSurvey> save(String userId, LearningSurvey survey) async =>
+      survey;
 }

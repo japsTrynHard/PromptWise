@@ -8,6 +8,8 @@ import './app.dart';
 import './core/config/app_environment.dart';
 import './presentation/controllers/adaptive_learning_controller.dart';
 import './presentation/controllers/auth_controller.dart';
+import './presentation/controllers/onboarding_controller.dart';
+import './presentation/controllers/learning_survey_controller.dart';
 import './presentation/controllers/awareness_feed_controller.dart';
 import './presentation/controllers/content_controller.dart';
 import './presentation/controllers/content_automation_controller.dart';
@@ -19,6 +21,8 @@ import './presentation/controllers/theme_controller.dart';
 import './presentation/controllers/verification_controller.dart';
 import './data/repositories/adaptive_learning_repository.dart';
 import './data/repositories/auth_repository.dart';
+import './data/repositories/onboarding_repository.dart';
+import './data/repositories/learning_survey_repository.dart';
 import './data/repositories/content_repository.dart';
 import './data/repositories/content_automation_repository.dart';
 import './data/repositories/learning_progression_repository.dart';
@@ -38,6 +42,8 @@ Future<void> main() async {
   }
 
   AuthRepository? authRepository;
+  OnboardingRepository? onboardingRepository;
+  LearningSurveyRepository? learningSurveyRepository;
   AdaptiveLearningRepository? adaptiveLearningRepository;
   ProgressRepository? progressRepository;
   ContentRepository? contentRepository;
@@ -56,6 +62,8 @@ Future<void> main() async {
     );
     final client = Supabase.instance.client;
     authRepository = AuthRepository(client);
+    onboardingRepository = OnboardingRepository(client);
+    learningSurveyRepository = LearningSurveyRepository(client);
     adaptiveLearningRepository = AdaptiveLearningRepository(client);
     progressRepository = ProgressRepository(client);
     contentRepository = ContentRepository(client);
@@ -73,6 +81,27 @@ Future<void> main() async {
       providers: [
         ChangeNotifierProvider(
           create: (_) => AuthController(repository: authRepository)..init(),
+        ),
+        ChangeNotifierProxyProvider<AuthController, OnboardingController>(
+          create: (_) => OnboardingController(repository: onboardingRepository!),
+          update: (_, auth, controller) {
+            final onboarding = controller ??
+                OnboardingController(repository: onboardingRepository!);
+            // Administrators never enter learner onboarding.
+            unawaited(onboarding.bindUser(
+              auth.isAdministrator ? null : auth.userId,
+            ));
+            return onboarding;
+          },
+        ),
+        ChangeNotifierProxyProvider<AuthController, LearningSurveyController>(
+          create: (_) => LearningSurveyController(repository: learningSurveyRepository!),
+          update: (_, auth, controller) {
+            final survey = controller ??
+                LearningSurveyController(repository: learningSurveyRepository!);
+            unawaited(survey.bindUser(auth.isAdministrator ? null : auth.userId));
+            return survey;
+          },
         ),
         ChangeNotifierProxyProvider<AuthController, ContentController>(
           create: (_) => ContentController(repository: contentRepository),

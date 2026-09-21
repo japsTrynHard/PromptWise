@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../controllers/adaptive_learning_controller.dart';
+import '../../controllers/learning_survey_controller.dart';
+import '../../../data/services/personalized_recommendation.dart';
 import '../../controllers/auth_controller.dart';
 import '../../controllers/awareness_feed_controller.dart';
 import '../../controllers/content_controller.dart';
@@ -34,17 +36,27 @@ class HomeScreen extends StatelessWidget {
     final content = context.watch<ContentController>();
     final awarenessFeed = context.watch<AwarenessFeedController>();
     final adaptive = context.watch<AdaptiveLearningController>();
+    final survey = context.watch<LearningSurveyController>();
+    final personalized = choosePersonalizedRecommendation(
+      survey: survey.survey,
+      mastery: adaptive.mastery,
+      dueReviews: adaptive.dueReviews,
+      diagnosticCompleted: adaptive.diagnosticCompleted,
+      fallbackTopic: adaptive.recommendedTopic,
+      fallbackReason: adaptive.recommendationReason,
+    );
     final modules = content.modules;
     final awareness = awarenessFeed.articles;
     final nextLesson = _findNextLesson(
       modules,
       progress.completedLessonIds.toSet(),
-      preferredTopic: adaptive.recommendedTopic,
+      preferredTopic: personalized.topic,
     );
     final recommendation = _buildRecommendation(
       content,
       progressController,
       adaptive,
+      personalized,
     );
 
     final compact = AdaptiveLayout.isPhone(context);
@@ -160,6 +172,7 @@ class HomeScreen extends StatelessWidget {
     ContentController content,
     ProgressController progress,
     AdaptiveLearningController adaptive,
+    PersonalizedRecommendation personalized,
   ) {
     if (!adaptive.diagnosticCompleted) {
       return const _Recommendation(
@@ -172,7 +185,7 @@ class HomeScreen extends StatelessWidget {
       );
     }
 
-    final topic = adaptive.recommendedTopic;
+    final topic = personalized.topic;
     if (topic != null) {
       final dueForReview = adaptive.masteryFor(topic).isDueForReview;
 
@@ -182,7 +195,7 @@ class HomeScreen extends StatelessWidget {
             return _Recommendation(
               title: 'Review ${topic.label}',
               description:
-                  '${adaptive.recommendationReason} This check can update your progress and next review.',
+                  '${personalized.reason} This check can update your progress and next review.',
               actionLabel: 'Open review check',
               icon: Icons.quiz_outlined,
               route: AppRoutes.quiz,
@@ -195,7 +208,7 @@ class HomeScreen extends StatelessWidget {
           return _Recommendation(
             title: 'Review verification',
             description:
-                '${adaptive.recommendationReason} Try a Compare Images round for a quick review.',
+                '${personalized.reason} Try a Compare Images round for a quick review.',
             actionLabel: 'Open verification activity',
             icon: Icons.image_search_outlined,
             route: AppRoutes.imageCompare,
@@ -218,7 +231,7 @@ class HomeScreen extends StatelessWidget {
             return _Recommendation(
               title: 'Check ${topic.label}',
               description:
-                  '${adaptive.recommendationReason} You finished the lesson. Try its quick check next.',
+                  '${personalized.reason} You finished the lesson. Try its quick check next.',
               actionLabel: 'Open linked check',
               icon: Icons.quiz_outlined,
               route: AppRoutes.quiz,
@@ -234,7 +247,7 @@ class HomeScreen extends StatelessWidget {
             return _Recommendation(
               title: 'Strengthen ${topic.label}',
               description:
-                  '${adaptive.recommendationReason} Continue with ${lesson.title}. Your progress updates after the related knowledge check.',
+                  '${personalized.reason} Continue with ${lesson.title}. Your progress updates after the related knowledge check.',
               actionLabel: 'Open recommended lesson',
               icon: Icons.route_outlined,
               route: AppRoutes.lesson,
@@ -251,7 +264,7 @@ class HomeScreen extends StatelessWidget {
           return _Recommendation(
             title: 'Practice ${topic.label}',
             description:
-                '${adaptive.recommendationReason} This quick check matches that skill.',
+                '${personalized.reason} This quick check matches that skill.',
             actionLabel: 'Open recommended check',
             icon: Icons.quiz_outlined,
             route: AppRoutes.quiz,
@@ -271,7 +284,7 @@ class HomeScreen extends StatelessWidget {
         return _Recommendation(
           title: 'Practice verification',
           description:
-              '${adaptive.recommendationReason} Try Compare Images for a quick verification practice round.',
+              '${personalized.reason} Try Compare Images for a quick verification practice round.',
           actionLabel: 'Open verification activity',
           icon: Icons.image_search_outlined,
           route: AppRoutes.imageCompare,
