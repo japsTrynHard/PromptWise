@@ -49,6 +49,7 @@ class _QuizScreenState extends State<QuizScreen> {
           .read<AdaptiveLearningController>()
           .recordPracticeAttempt(
             itemId: widget.quiz.id,
+            selectedIndex: _selectedIndex,
             topic: topic,
             isCorrect: _isCorrect,
             attemptType: 'quiz',

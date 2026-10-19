@@ -321,6 +321,7 @@ class _PendingAdaptive extends AdaptiveLearningController {
     required bool isCorrect,
     String attemptType = 'quiz',
     bool countedForMastery = true,
+    int? selectedIndex,
   }) {
     calls++;
     return pending.future;

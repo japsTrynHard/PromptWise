@@ -21,8 +21,8 @@ class AdaptiveLearningRepository {
       final map = response is Map
           ? Map<String, dynamic>.from(response)
           : response is List && response.isNotEmpty && response.first is Map
-              ? Map<String, dynamic>.from(response.first as Map)
-              : const <String, dynamic>{};
+          ? Map<String, dynamic>.from(response.first as Map)
+          : const <String, dynamic>{};
       if (map.isNotEmpty) return AdaptiveRemoteState.fromMap(map);
     } on PostgrestException catch (error) {
       if (!_isMissingRpc(error)) rethrow;
@@ -43,22 +43,23 @@ class AdaptiveLearningRepository {
       diagnosticCompleted: diagnostics.isNotEmpty,
       mastery: List<TopicMastery>.from(results[0] as List),
       diagnostics: diagnostics,
-      countedAttempts:
-          List<AdaptiveQuestionAttemptRecord>.from(results[2] as List),
+      countedAttempts: List<AdaptiveQuestionAttemptRecord>.from(
+        results[2] as List,
+      ),
     );
   }
 
   Future<List<TopicMastery>> fetchTopicMastery(String userId) async {
     final response = await _client
         .from('topic_mastery')
-        .select('topic_id,mastery,attempts,correct_answers,last_practiced_at,next_review_at')
+        .select(
+          'topic_id,mastery,attempts,correct_answers,last_practiced_at,next_review_at',
+        )
         .eq('user_id', userId)
         .order('topic_id');
     return (response as List)
         .map(
-          (row) => TopicMastery.fromMap(
-            Map<String, dynamic>.from(row as Map),
-          ),
+          (row) => TopicMastery.fromMap(Map<String, dynamic>.from(row as Map)),
         )
         .toList(growable: false);
   }
@@ -131,7 +132,30 @@ class AdaptiveLearningRepository {
     required String attemptType,
     required bool countedForMastery,
     DateTime? attemptedAt,
+    int? selectedIndex,
   }) async {
+    try {
+      final result = await _client.rpc(
+        'record_adaptive_answer',
+        params: {
+          'p_user_id': userId,
+          'p_item_id': itemId,
+          'p_topic_id': topic.id,
+          'p_is_correct': isCorrect,
+          'p_attempt_type': attemptType,
+          'p_counted_for_mastery': countedForMastery,
+          'p_attempted_at': (attemptedAt ?? DateTime.now())
+              .toUtc()
+              .toIso8601String(),
+          'p_selected_index': selectedIndex,
+        },
+      );
+      return _asBool(result);
+    } on PostgrestException catch (error) {
+      // Compatibility only while the new migration is absent. An authorization
+      // or grading rejection must never fall back to the old boolean RPC.
+      if (!_isMissingRpc(error)) rethrow;
+    }
     final occurredAt = (attemptedAt ?? DateTime.now()).toUtc();
     try {
       final response = await _client.rpc(
@@ -236,7 +260,9 @@ class AdaptiveLearningRepository {
   Future<void> rebuildAdaptiveMastery(String userId) async {
     final currentUserId = _client.auth.currentUser?.id;
     if (currentUserId != userId) {
-      throw StateError('Adaptive mastery can only be rebuilt for the signed-in learner.');
+      throw StateError(
+        'Adaptive mastery can only be rebuilt for the signed-in learner.',
+      );
     }
     try {
       await _client.rpc('rebuild_my_adaptive_mastery');
@@ -253,10 +279,9 @@ class AdaptiveLearningRepository {
     required String userId,
     required TopicMastery mastery,
   }) async {
-    await _client.from('topic_mastery').upsert(
-      mastery.toMap(userId: userId),
-      onConflict: 'user_id,topic_id',
-    );
+    await _client
+        .from('topic_mastery')
+        .upsert(mastery.toMap(userId: userId), onConflict: 'user_id,topic_id');
   }
 
   Future<void> upsertReviewSchedule({
@@ -279,7 +304,9 @@ class AdaptiveLearningRepository {
     if (response is num) return response != 0;
     if (response is String) return response.toLowerCase() == 'true';
     if (response is List && response.isNotEmpty) return _asBool(response.first);
-    if (response is Map && response.isNotEmpty) return _asBool(response.values.first);
+    if (response is Map && response.isNotEmpty) {
+      return _asBool(response.values.first);
+    }
     return false;
   }
 
@@ -343,4 +370,3 @@ class AdaptiveRemoteState {
     );
   }
 }
-

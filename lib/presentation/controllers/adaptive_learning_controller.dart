@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../data/models/adaptive_learning.dart';
 import '../../data/models/learning_topic.dart';
@@ -320,7 +321,7 @@ class AdaptiveLearningController extends ChangeNotifier {
     if (_isSubmittingDiagnostic) {
       throw StateError('The diagnostic assessment is already being saved.');
     }
-    if (answers.length < diagnosticQuestions.length) {
+    if (answers.length != diagnosticQuestions.length) {
       throw ArgumentError(
         'Answer every diagnostic question before submitting.',
       );
@@ -395,6 +396,10 @@ class AdaptiveLearningController extends ChangeNotifier {
       _errorMessage = null;
     } catch (error) {
       if (error is StateError) rethrow;
+      if (error is PostgrestException &&
+          ['22023', '42501'].contains(error.code)) {
+        throw StateError(error.message);
+      }
 
       // Offline/local fallback: preserve exactly one local diagnostic and queue
       // it. The cloud RPC will either accept it or reconcile to the existing
@@ -437,6 +442,7 @@ class AdaptiveLearningController extends ChangeNotifier {
     required bool isCorrect,
     String attemptType = 'quiz',
     bool countedForMastery = true,
+    int? selectedIndex,
   }) async {
     final normalizedItemId = itemId.trim();
     final normalizedType = attemptType.trim().isEmpty
@@ -471,6 +477,7 @@ class AdaptiveLearningController extends ChangeNotifier {
         shouldCount = await repository.recordQuestionAttempt(
           userId: userId,
           itemId: normalizedItemId,
+          selectedIndex: selectedIndex,
           topic: topic,
           isCorrect: isCorrect,
           attemptType: normalizedType,
@@ -478,7 +485,14 @@ class AdaptiveLearningController extends ChangeNotifier {
           attemptedAt: occurredAt,
         );
         cloudSaved = true;
-      } catch (_) {
+      } catch (error) {
+        if (error is PostgrestException &&
+            ['22023', '42501'].contains(error.code)) {
+          _errorMessage =
+              'The server could not validate this answer. Refresh the content and try again.';
+          notifyListeners();
+          return false;
+        }
         // When cloud saving fails, use the same local eligibility rule instead
         // of blindly counting the attempt and risking offline score farming.
         shouldCount =
@@ -492,6 +506,7 @@ class AdaptiveLearningController extends ChangeNotifier {
         await _queuePendingAttempt(
           userId: userId,
           itemId: normalizedItemId,
+          selectedIndex: selectedIndex,
           topic: topic,
           isCorrect: isCorrect,
           attemptType: normalizedType,
@@ -790,6 +805,9 @@ class AdaptiveLearningController extends ChangeNotifier {
           await repository.recordQuestionAttempt(
             userId: userId,
             itemId: map['item_id']?.toString() ?? '',
+            selectedIndex: map['selected_index'] is int
+                ? map['selected_index'] as int
+                : null,
             topic: topic,
             isCorrect: map['is_correct'] == true,
             attemptType: map['attempt_type']?.toString() ?? 'quiz',
@@ -838,6 +856,7 @@ class AdaptiveLearningController extends ChangeNotifier {
     required String attemptType,
     required bool countedForMastery,
     required DateTime attemptedAt,
+    int? selectedIndex,
   }) async {
     final key = _pendingAttemptsKey(userId);
     final pending = <Map<String, dynamic>>[];
@@ -858,6 +877,7 @@ class AdaptiveLearningController extends ChangeNotifier {
     }
     pending.add({
       'item_id': itemId,
+      'selected_index': selectedIndex,
       'topic_id': topic.id,
       'is_correct': isCorrect,
       'attempt_type': attemptType,
