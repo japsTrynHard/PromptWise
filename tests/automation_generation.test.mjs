@@ -56,7 +56,7 @@ function verification(skill) {
 function harness({ topics = FOCUS_TOPICS, verify = false, cap = 10, failTopic,
   missing = false, fallback = false, duplicate = false, invalid = false, saveFails = false,
   httpStatus, timeout = false, wrongBody = false, missingTopic, brokenFeed = false,
-  omitSelection = false, cooldownMinutes = 30, lastManualRunAt = null, pageSource = false, shortSections = false, repairFails = false, repairWrongIndex = false, unlimited = false, usage = 0, recentSuccess = false, tokenCeiling = 4096, firstModelTimeout = false, advanceAfterFirstDraft = false, articleSaveFails = false,
+  omitSelection = false, cooldownMinutes = 30, lastManualRunAt = null, articleInsertRace = false, dailyCap = 50, extraCandidate = false, sharedSource = false, pageSource = false, shortSections = false, repairFails = false, repairWrongIndex = false, unlimited = false, usage = 0, recentSuccess = false, tokenCeiling = 4096, firstModelTimeout = false, advanceAfterFirstDraft = false, articleSaveFails = false,
   modelIds = ['fixture-model'], rateLimitedModels = [] } = {}) {
   const all = verify ? VERIFICATION_FOCUS_SKILLS : FOCUS_TOPICS;
   const signals = verify ? verifySignals : learningSignals;
@@ -66,16 +66,18 @@ function harness({ topics = FOCUS_TOPICS, verify = false, cap = 10, failTopic,
       source_url: `https://trusted.invalid/article-${i}`, ai_relevance_score: 8,
       content_excerpt: wrongBody ? '' : body(signals[i]), source_name: 'Fixture publisher', relevance_score: 80 };
   });
+  if (extraCandidate && rows.length) rows.push({...rows[0],source_url:rows[0].source_url+'-other',title:'Advanced '+rows[0].title});
+  if (sharedSource) for (const row of rows) { row.source_url = trusted.source_url; row.title = signals.join(' '); row.summary = body(signals.join(' ')); row.content_excerpt = row.summary; }
   feedItems = fallback ? [] : rows.map(row => ({ title: row.title, description: row.summary, link: row.source_url }));
   const inserts = [], calls = [], updates = [], modelCalls = [];
   const settings = { unlimited_generation: unlimited,
     last_manual_success_at: recentSuccess ? new Date().toISOString() : null,
-    last_manual_attempt_at: recentSuccess ? new Date().toISOString() : null, manual_cooldown_minutes: cooldownMinutes, last_manual_run_at: lastManualRunAt, enabled: true, max_articles_per_run: cap, max_drafts_per_day: 50,
+    last_manual_attempt_at: recentSuccess ? new Date().toISOString() : null, manual_cooldown_minutes: cooldownMinutes, last_manual_run_at: lastManualRunAt, enabled: true, max_articles_per_run: cap, max_drafts_per_day: dailyCap,
     monthly_draft_cap: 100, max_drafts_per_run: cap, monthly_groq_request_cap: 100, focus_topics: topics };
   class Query {
     constructor(table) { this.table = table; this.kind = 'read'; }
     select(_, options) { this.head = options?.head; return this; }
-    eq() { return this; } neq() { return this; } gte() { return this; }
+    eq(key,value) { this.filters ??= {}; this.filters[key]=value; return this; } neq() { return this; } gte() { return this; }
     order() { return this; } limit() { return this; } or() { return this; }
     insert(value) { this.kind = 'insert'; this.value = value; return this; }
     update(value) { this.kind = 'update'; this.value = value; return this; }
@@ -84,7 +86,8 @@ function harness({ topics = FOCUS_TOPICS, verify = false, cap = 10, failTopic,
       let result = { data: null, error: null, count: this.head && ['verification_case_drafts','verification_groq_requests'].includes(this.table) ? usage : 0 };
       if (this.kind === 'insert') {
         const isDraft = ['generated_content_drafts','verification_case_drafts'].includes(this.table);
-        if ((isDraft && saveFails) || (this.table === 'discovered_articles' && articleSaveFails)) result.error = {message: 'Fixture persistence failure'};
+        if (this.table === 'discovered_articles' && articleInsertRace && inserts.some(i=>i.table===this.table)) result.error={code:'23505',message:'Concurrent article insert'};
+        else if ((isDraft && saveFails) || (this.table === 'discovered_articles' && articleSaveFails)) result.error = {message: 'Fixture persistence failure'};
         else { inserts.push({table: this.table, value: this.value}); result.data = {id: `saved-${inserts.length}`}; }
       } else if (this.kind === 'update') updates.push({table: this.table, value: this.value});
       else if (!this.head) {
@@ -93,7 +96,8 @@ function harness({ topics = FOCUS_TOPICS, verify = false, cap = 10, failTopic,
         if (this.table === 'content_sources') result.data = [{...trusted,source_type:pageSource ? 'page' : 'rss'}];
         if (this.table === 'awareness_articles') result.data = fallback ? [] : rows;
         if (this.table === 'verification_case_drafts') result.data = duplicate ? [{id:'duplicate'}] : [];
-        if (this.table === 'discovered_articles') result.data = duplicate ? {id:'duplicate',status:'processed'} : null;
+        if (this.table === 'discovered_articles') result.data = articleInsertRace ? (this.filters?.article_url ? {id:'saved-1',status:'processed'} : null) : duplicate ? {id:'duplicate',status:'processed'} : sharedSource && inserts.some(i=>i.table==='discovered_articles') ? {id:'saved-1',status:'processed'} : null;
+        if (this.table === 'generated_content_drafts') result.data = duplicate ? [{id:'duplicate'}] : inserts.filter(i=>i.table===this.table && i.value.topic_id===this.filters?.topic_id).map(()=>({id:'existing'}));
       }
       return Promise.resolve(result).then(resolve, reject);
     }
@@ -118,7 +122,7 @@ function harness({ topics = FOCUS_TOPICS, verify = false, cap = 10, failTopic,
       calls.push(topic);
       if (timeout || topic === failTopic) throw Error('Fixture provider timeout');
       if (httpStatus) return new Response('Provider unavailable', {status:httpStatus});
-      if (advanceAfterFirstDraft && calls.length === 1) clockOffset = 110_000;
+      if (advanceAfterFirstDraft && calls.length === 1) clockOffset = 130_000;
       let payload = invalid ? {title:'Invalid'} : verify ? verification(topic) : lesson(topic);
       if (!verify && shortSections && !invalid) {
         if (prompt.includes('REPAIR SHORT LESSON SECTIONS')) {
@@ -171,10 +175,10 @@ for (const verify of [false, true]) {
     assert.ok(data.topicResults.every(item => item.created === 1));
     assert.equal(new Set(drafts.map(item => item.value.source_url)).size,count);
   });
-  test(`${verify ? 'Verify' : 'Learning'} never exceeds a two-draft cap; reports every topic`, async () => {
+  test(`${verify ? 'Verify' : 'Learning'} selected topics override the old per-run batch cap`, async () => {
     const {data,drafts} = await harness({verify,topics,cap:2}).run();
-    assert.equal(drafts.length,2); assert.equal(data.success,false); assert.equal(data.partial,true);
-    assert.equal(data.topicResults.filter(item => item.status === 'deferred_by_limit').length,topics.length-2);
+    assert.equal(drafts.length,verify ? 2 : topics.length,JSON.stringify(data));
+    if(!verify) assert.ok(data.topicResults.every(item=>item.created===1));
   });
   test(`${verify ? 'Verify' : 'Learning'} timeout on one topic preserves other drafts`, async () => {
     const {data,drafts} = await harness({verify,topics:topics.slice(0,2),failTopic:topics[0]}).run();
@@ -354,4 +358,33 @@ test('GPT-OSS Learning requests and targeted repairs use the documented low reas
   const {data,drafts}=await harness({topics:['responsible_use'],shortSections:true,modelIds:['openai/gpt-oss-20b']}).run();
   assert.equal(drafts.length,1,JSON.stringify(data));
   assert.equal(data.groqRequestsUsed,2);
+});
+
+for(const verify of [false]) test('one shared trusted source supports a separate draft for each selected topic: '+verify,async()=>{
+  const topics=verify ? VERIFICATION_FOCUS_SKILLS : FOCUS_TOPICS;
+  const {data,drafts}=await harness({verify,topics,sharedSource:true,cap:1}).run();
+  assert.equal(drafts.length,topics.length,JSON.stringify(data));
+  assert.ok(data.topicResults.every(item=>item.created===1));
+  if(!verify) assert.ok(drafts.every(d=>d.value.draft_payload.questions.length===5));
+});
+
+test('Learning rejects insufficient saved daily allowance before spending AI requests',async()=>{
+  const h=harness({topics:['context','specificity'],dailyCap:1});
+  const {response,data,drafts}=await h.run();
+  assert.equal(response.status,409);assert.equal(drafts.length,0);assert.equal(h.calls.length,0);
+  assert.match(data.error,/Selected 2 topics/);
+});
+test('Learning stops at one lesson for a selected topic even with extra matching sources',async()=>{
+  const h=harness({topics:['context'],extraCandidate:true});
+  const {data,drafts}=await h.run();
+  assert.equal(drafts.length,1,JSON.stringify(data));assert.equal(h.calls.length,1);
+});
+
+test('parallel Learning topics recover a shared-source unique insert race',async()=>{
+  const {data,drafts,inserts}=await (async()=>{
+    const h=harness({topics:FOCUS_TOPICS,sharedSource:true,articleInsertRace:true});
+    return {...await h.run(),inserts:h.inserts};
+  })();
+  assert.equal(drafts.length,5,JSON.stringify(data));
+  assert.equal(inserts.filter(i=>i.table==='discovered_articles').length,1);
 });

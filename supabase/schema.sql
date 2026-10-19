@@ -4638,7 +4638,7 @@ CREATE UNIQUE INDEX "uq_awareness_source_domains_domain" ON "public"."awareness_
 
 
 
-CREATE UNIQUE INDEX "uq_generated_draft_article" ON "public"."generated_content_drafts" USING "btree" ("article_id") WHERE (("article_id" IS NOT NULL) AND ("status" <> 'rejected'::"text"));
+CREATE UNIQUE INDEX "uq_generated_draft_article" ON "public"."generated_content_drafts" USING "btree" ("article_id", "topic_id") WHERE (("article_id" IS NOT NULL) AND ("status" <> 'rejected'::"text"));
 
 
 

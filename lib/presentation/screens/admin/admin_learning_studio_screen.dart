@@ -548,7 +548,7 @@ class _AutomationCard extends StatelessWidget {
               Padding(
                 padding: const EdgeInsets.only(bottom: 12),
                 child: Text(
-                  'Up to ${settings.maxArticlesPerRun} sources per run. Question queue: ${queue.pendingQuestions}/${queue.maxPendingQuestions}. Pending drafts archive after ${queue.draftArchiveDays} days. Manual focus choices never change your saved schedule.',
+                  'Scheduled runs target up to ${settings.maxArticlesPerRun} drafts. Manual runs target one lesson per selected topic, subject to daily/monthly and review-queue capacity. Question queue: ${queue.pendingQuestions}/${queue.maxPendingQuestions}. Pending drafts archive after ${queue.draftArchiveDays} days.',
                 ),
               ),
             ],
@@ -564,7 +564,7 @@ class _AutomationCard extends StatelessWidget {
       builder: (dialogContext) => StudioFocusDialog<LearningTopic>(
         title: 'Create lesson drafts',
         description:
-            'Choose topics for this run only. Your saved scheduled focus areas will not change.',
+            'Choose topics for this run only. Each selected topic requests one lesson draft. Daily/monthly limits and review-queue capacity must fit the whole selection. Your saved scheduled focus areas will not change.',
         initial: controller.settings.focusTopics,
         options: LearningTopic.values
             .map(

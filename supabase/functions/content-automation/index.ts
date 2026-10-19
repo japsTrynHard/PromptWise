@@ -603,6 +603,10 @@ Deno.serve(async (req) => {
         queueDraftRemaining,
       );
 
+      if (mode === 'manual' && draftBudget < focusTopics!.length) {
+        await completeRun(service, runId, {status:'skipped',sourcesChecked:0,articlesDiscovered:0,draftsCreated:0});
+        return jsonResponse({error: 'Selected ' + focusTopics!.length + ' topics, but only ' + draftBudget + ' lesson slots remain under your daily/monthly/review limits. Increase the limits or select fewer topics; no generation was charged.', success:false, draftsCreated:0}, 409);
+      }
       if (draftBudget <= 0) {
         await completeRun(service, runId, {
           status: 'skipped',
@@ -631,7 +635,7 @@ Deno.serve(async (req) => {
       if (sourceError) throw sourceError;
 
       // Reserve time for generation and returning a useful response before Edge timeout.
-      const deadline = Date.now() + 100_000;
+      const deadline = Date.now() + 120_000;
       const discoveryDeadline = Date.now() + 24_000;
       const failureSamples: string[] = [];
       const sources = (sourceRows ?? []) as SourceRow[];
@@ -686,7 +690,7 @@ Deno.serve(async (req) => {
       const planningSeed = [...runId].reduce((sum, char) => sum + char.charCodeAt(0), 0);
       const focusedCandidates = planCandidates(
         dedupeCandidates(candidates).sort((a, b) => b.relevanceScore - a.relevanceScore),
-        focusTopics!, textSupportsFocus, planningSeed,
+        focusTopics!, textSupportsFocus, planningSeed, { allowSharedSources: true },
       );
       const savedByTopic: Record<string, number> = {};
       const attemptedByTopic: Record<string, number> = {};
@@ -695,7 +699,7 @@ Deno.serve(async (req) => {
       let draftsCreated = 0;
       let verificationDraftsCreated = 0;
       let processingFailures = 0;
-      const maxArticles = Math.max(1, Number(settings.max_articles_per_run ?? 3));
+      const maxArticles = mode === 'manual' ? focusTopics!.length : Math.max(1, Number(settings.max_articles_per_run ?? 3));
       // No matched source means no Groq request and no random fallback topic.
       const groqModels = focusedCandidates.length > 0
         ? await resolveGroqModels(groqApiKey)
@@ -705,152 +709,170 @@ Deno.serve(async (req) => {
       }
 
       const lessonRequestBudget: GroqRequestBudget = {
-        remaining: Math.min(20, Math.max(3, Math.min(draftBudget, maxArticles) * 2)), used: 0,
+        remaining: Math.min(20, Math.max(3, Math.min(draftBudget, maxArticles) * 3)), used: 0,
       };
       let candidateAttempts = 0;
-      for (const { candidate, focusTopic } of focusedCandidates) {
-        if (Date.now() >= deadline - 3000 || groqModels.length === 0 || lessonRequestBudget.remaining <= 0 || candidateAttempts >= Math.min(30, Math.max(maxArticles * 3, focusTopics!.length)) || draftsCreated >= Math.min(draftBudget, maxArticles)) {
-          break;
-        }
+      const batchTopics = [...new Set(focusedCandidates.map(entry => entry.focusTopic))]
+        .slice(0, Math.min(draftBudget, maxArticles));
+      const articleTexts = new Map<string, Promise<string>>();
+      await Promise.all(batchTopics.map(async topic => {
+        for (const { candidate, focusTopic } of focusedCandidates.filter(entry => entry.focusTopic === topic)) {
+          if ((savedByTopic[focusTopic] ?? 0) >= 1) continue;
+          if (Date.now() >= deadline - 3000 || groqModels.length === 0 || lessonRequestBudget.remaining <= 0 || candidateAttempts >= Math.min(30, Math.max(maxArticles * 3, focusTopics!.length)) || draftsCreated >= Math.min(draftBudget, maxArticles)) {
+            break;
+          }
 
-        candidateAttempts += 1;
-        attemptedByTopic[focusTopic] = (attemptedByTopic[focusTopic] ?? 0) + 1;
-        const fingerprint = await sha256(
-          `${normalizeUrl(candidate.url)}|${candidate.title.toLowerCase().trim()}`,
-        );
+          candidateAttempts += 1;
+          attemptedByTopic[focusTopic] = (attemptedByTopic[focusTopic] ?? 0) + 1;
+          const fingerprint = await sha256(
+            `${normalizeUrl(candidate.url)}|${candidate.title.toLowerCase().trim()}`,
+          );
 
-        let article: { id: string } | undefined;
-        try {
-          const { data: existingArticle, error: lookupError } = await service
-            .from('discovered_articles')
-            .select('id, status')
-            .or(`article_url.eq.${escapePostgrest(candidate.url)},fingerprint.eq.${fingerprint}`)
-            .maybeSingle();
-
-          if (lookupError) throw lookupError;
-          if (existingArticle) {
-            // Processed/ignored articles are intentionally deduplicated forever, but a
-            // failed article must be retryable after a model/configuration fix.
-            if (existingArticle.status !== 'failed') continue;
-            article = { id: String(existingArticle.id) };
-            await service
+          let article: { id: string } | undefined;
+          try {
+            const { data: existingArticle, error: lookupError } = await service
               .from('discovered_articles')
-              .update({ status: 'new', processed_at: null })
-              .eq('id', article.id);
-          } else {
-            const { data: insertedArticle, error: articleError } = await service
-              .from('discovered_articles')
-              .insert({
-                source_id: candidate.sourceId,
-                article_url: candidate.url,
-                title: candidate.title,
-                summary: candidate.summary,
-                published_at: candidate.publishedAt,
-                fingerprint,
-                relevance_score: candidate.relevanceScore,
-                topic_hint: candidate.topicHint,
-                status: 'new',
-              })
-              .select('id')
-              .single();
-            if (articleError) {
-              if ((articleError as { code?: string }).code === '23505') continue;
-              throw articleError;
-            }
-            article = { id: String(insertedArticle.id) };
-            articlesDiscovered += 1;
-          }
+              .select('id, status')
+              .or(`article_url.eq.${escapePostgrest(candidate.url)},fingerprint.eq.${fingerprint}`)
+              .maybeSingle();
 
-          const articleText = candidate.cachedText ?? articleTextFromHtml(await fetchText(candidate.url, Math.max(1, Math.min(8000, deadline - Date.now() - 3000))));
-          if (articleText.length < 300) {
-            await markArticle(service, article.id, 'ignored');
-            continue;
-          }
-          if (!textSupportsFocus(articleText, focusTopic)) {
-            // The feed headline matched, but the underlying source cannot
-            // support a lesson about the selected skill. Never ask the AI to
-            // invent a connection; keep it retryable for source corrections.
-            await markArticle(service, article.id, 'failed');
-            continue;
-          }
-
-          const draft = await generateDraft({
-            apiKey: groqApiKey,
-            models: groqModels,
-            candidate,
-            articleText,
-            focusTopic,
-            requestBudget: lessonRequestBudget,
-            deadline,
-          });
-          validateDraft(draft);
-          enforceDraftFocus(draft, focusTopic);
-
-          const { error: draftError } = await service
-            .from('generated_content_drafts')
-            .insert({
-              article_id: article.id,
-              title: draft.title,
-              summary: draft.summary,
-              topic_id: draft.topic_id,
-              target_level: draft.target_level,
-              source_name: candidate.sourceName,
-              source_url: candidate.url,
-              source_published_at: candidate.publishedAt,
-              draft_payload: draft,
-              status: 'draft',
-            });
-          if (draftError) throw draftError;
-
-          const verificationCase = draft.verification_case ?? null;
-          if (
-            verificationSettings.enabled !== false &&
-            verificationCase != null &&
-            pendingVerificationDrafts + verificationDraftsCreated <
-              maxPendingVerificationDrafts
-          ) {
-            // Phase 9 verification cases are optional companions to the lesson
-            // draft. A malformed/duplicate verification case must never turn a
-            // valid Phase 7 lesson draft into a failed article run.
-            try {
-              validateVerificationCaseDraft(verificationCase);
-              const { error: verificationDraftError } = await service
-                .from('verification_case_drafts')
+            if (lookupError) throw lookupError;
+            if (existingArticle) {
+              if (existingArticle.status === 'ignored') continue;
+              const { data: topicDrafts, error: topicError } = await service
+                .from('generated_content_drafts').select('id')
+                .eq('article_id', existingArticle.id).eq('topic_id', focusTopic)
+                .neq('status', 'rejected').limit(1);
+              if (topicError) throw topicError;
+              if ((topicDrafts ?? []).length > 0) continue;
+              article = { id: String(existingArticle.id) };
+              await service
+                .from('discovered_articles')
+                .update({ status: 'new', processed_at: null })
+                .eq('id', article.id);
+            } else {
+              const { data: insertedArticle, error: articleError } = await service
+                .from('discovered_articles')
                 .insert({
-                  article_id: article.id,
-                  title: verificationCase.title,
-                  summary: verificationCase.summary,
-                  source_name: candidate.sourceName,
-                  source_url: candidate.url,
-                  source_published_at: candidate.publishedAt,
-                  draft_payload: verificationCase,
-                  status: 'draft',
-                });
-              if (verificationDraftError) {
-                const code = (verificationDraftError as { code?: string }).code;
-                if (code !== '23505') throw verificationDraftError;
+                  source_id: candidate.sourceId,
+                  article_url: candidate.url,
+                  title: candidate.title,
+                  summary: candidate.summary,
+                  published_at: candidate.publishedAt,
+                  fingerprint,
+                  relevance_score: candidate.relevanceScore,
+                  topic_hint: candidate.topicHint,
+                  status: 'new',
+                })
+                .select('id')
+                .single();
+              if (articleError) {
+                if ((articleError as { code?: string }).code !== '23505') throw articleError;
+                // Another selected topic may have claimed the same source first.
+                const { data: raced, error: raceError } = await service.from('discovered_articles')
+                  .select('id').eq('article_url', candidate.url).single();
+                if (raceError || !raced) throw raceError ?? articleError;
+                article = { id: String(raced.id) };
               } else {
-                verificationDraftsCreated += 1;
+                article = { id: String(insertedArticle.id) };
+                articlesDiscovered += 1;
               }
-            } catch (verificationError) {
-              console.warn(
-                'Optional Phase 9 verification case was skipped:',
-                candidate.url,
-                errorMessage(verificationError),
-              );
             }
-          }
 
-          await markArticle(service, article.id, 'processed');
-          draftsCreated += 1;
-          savedByTopic[focusTopic] = (savedByTopic[focusTopic] ?? 0) + 1;
-        } catch (error) {
-          processingFailures += 1;
-          if (failureSamples.length < 3) failureSamples.push(`${candidate.sourceName}: ${errorMessage(error).slice(0, 500)}`);
-          console.error('Article processing failed', candidate.url, error);
-          if (article) await markArticle(service, article.id, 'failed');
+            if (!articleTexts.has(candidate.url)) articleTexts.set(candidate.url, candidate.cachedText != null
+              ? Promise.resolve(candidate.cachedText)
+              : fetchText(candidate.url, Math.max(1, Math.min(8000, deadline - Date.now() - 3000))).then(articleTextFromHtml));
+            const articleText = await articleTexts.get(candidate.url)!;
+            if (articleText.length < 300) {
+              await markArticle(service, article.id, 'ignored');
+              continue;
+            }
+            if (!textSupportsFocus(articleText, focusTopic)) {
+              // The feed headline matched, but the underlying source cannot
+              // support a lesson about the selected skill. Never ask the AI to
+              // invent a connection; keep it retryable for source corrections.
+              await markArticle(service, article.id, 'failed');
+              continue;
+            }
+
+            const draft = await generateDraft({
+              apiKey: groqApiKey,
+              models: groqModels,
+              candidate,
+              articleText,
+              focusTopic,
+              requestBudget: lessonRequestBudget,
+              deadline,
+            });
+            validateDraft(draft);
+            enforceDraftFocus(draft, focusTopic);
+
+            const { error: draftError } = await service
+              .from('generated_content_drafts')
+              .insert({
+                article_id: article.id,
+                title: draft.title,
+                summary: draft.summary,
+                topic_id: draft.topic_id,
+                target_level: draft.target_level,
+                source_name: candidate.sourceName,
+                source_url: candidate.url,
+                source_published_at: candidate.publishedAt,
+                draft_payload: draft,
+                status: 'draft',
+              });
+            if (draftError) throw draftError;
+
+            const verificationCase = draft.verification_case ?? null;
+            if (
+              verificationSettings.enabled !== false &&
+              verificationCase != null &&
+              pendingVerificationDrafts + verificationDraftsCreated <
+                maxPendingVerificationDrafts
+            ) {
+              // Phase 9 verification cases are optional companions to the lesson
+              // draft. A malformed/duplicate verification case must never turn a
+              // valid Phase 7 lesson draft into a failed article run.
+              try {
+                validateVerificationCaseDraft(verificationCase);
+                const { error: verificationDraftError } = await service
+                  .from('verification_case_drafts')
+                  .insert({
+                    article_id: article.id,
+                    title: verificationCase.title,
+                    summary: verificationCase.summary,
+                    source_name: candidate.sourceName,
+                    source_url: candidate.url,
+                    source_published_at: candidate.publishedAt,
+                    draft_payload: verificationCase,
+                    status: 'draft',
+                  });
+                if (verificationDraftError) {
+                  const code = (verificationDraftError as { code?: string }).code;
+                  if (code !== '23505') throw verificationDraftError;
+                } else {
+                  verificationDraftsCreated += 1;
+                }
+              } catch (verificationError) {
+                console.warn(
+                  'Optional Phase 9 verification case was skipped:',
+                  candidate.url,
+                  errorMessage(verificationError),
+                );
+              }
+            }
+
+            await markArticle(service, article.id, 'processed');
+            draftsCreated += 1;
+            savedByTopic[focusTopic] = (savedByTopic[focusTopic] ?? 0) + 1;
+          } catch (error) {
+            processingFailures += 1;
+            if (failureSamples.length < 3) failureSamples.push(`${candidate.sourceName}: ${errorMessage(error).slice(0, 500)}`);
+            console.error('Article processing failed', candidate.url, error);
+            if (article) await markArticle(service, article.id, 'failed');
+          }
         }
-      }
+      }));
 
       const outcomes: Array<{ topic: string; created: number; status: string }> = topicResults(focusTopics!, focusedCandidates, savedByTopic, attemptedByTopic);
       const failures = processingFailures + sourceFailures;
