@@ -69,6 +69,7 @@ class _QuizScreenState extends State<QuizScreen> {
   }
 
   void _tryAgain() {
+    if (_isSubmitting) return;
     setState(() {
       _selectedIndex = null;
       _answered = false;
@@ -246,8 +247,8 @@ class _QuizScreenState extends State<QuizScreen> {
     final evidenceText = !hasAdaptiveTopic
         ? ''
         : _masteryCounted
-            ? ' Your progress was updated.'
-            : ' This retry was saved as practice without increasing progress again.';
+        ? ' Your progress was updated.'
+        : ' This retry was saved as practice without increasing progress again.';
     if (!_isCorrect) {
       return 'Review the explanation, then decide whether to try again.$evidenceText';
     }
@@ -274,26 +275,37 @@ class _QuizScreenState extends State<QuizScreen> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           ElevatedButton.icon(
-            onPressed: _tryAgain,
+            onPressed: _isSubmitting ? null : _tryAgain,
             icon: const Icon(Icons.refresh_rounded),
             label: const Text('Try Again'),
           ),
           const SizedBox(height: AppSpacing.sm),
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: _isSubmitting ? null : () => Navigator.pop(context),
             child: const Text('Back to Lessons'),
           ),
         ],
       );
     }
 
-    return SizedBox(
-      width: double.infinity,
-      child: OutlinedButton.icon(
-        onPressed: _isSubmitting ? null : () => Navigator.pop(context),
-        icon: const Icon(Icons.arrow_back_rounded),
-        label: Text(_isSubmitting ? 'Saving result...' : 'Back to Lessons'),
-      ),
+    // A deliberate retry after full credit is part of TC_QUIZ_NEG_004.
+    // ProgressController.recordQuizResult preserves the previous best score;
+    // a new answer is still a separate practice attempt.
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        ElevatedButton.icon(
+          onPressed: _isSubmitting ? null : _tryAgain,
+          icon: const Icon(Icons.refresh_rounded),
+          label: const Text('Try Again'),
+        ),
+        const SizedBox(height: AppSpacing.sm),
+        OutlinedButton.icon(
+          onPressed: _isSubmitting ? null : () => Navigator.pop(context),
+          icon: const Icon(Icons.arrow_back_rounded),
+          label: Text(_isSubmitting ? 'Saving result...' : 'Back to Lessons'),
+        ),
+      ],
     );
   }
 }

@@ -1,5 +1,19 @@
 import './learning_topic.dart';
 
+/// Shared contract used by the settings UI's repository boundary. Do not
+/// accept the invalid enabled/empty combination even from non-UI callers.
+void validateScheduledAutomationFocus({
+  required bool enabled,
+  required List<LearningTopic> focusTopics,
+}) {
+  if (enabled && focusTopics.isEmpty) {
+    throw ArgumentError('Select at least one scheduled focus area.');
+  }
+  if (focusTopics.toSet().length != focusTopics.length) {
+    throw ArgumentError('Scheduled focus areas must not contain duplicates.');
+  }
+}
+
 class ContentSource {
   final String id;
   final String name;
@@ -45,6 +59,7 @@ class AutomationSettings {
   final int rejectedDeleteDays;
   final int archivedDeleteDays;
   final DateTime? lastManualRunAt;
+
   /// Saved focus areas for scheduled lesson generation. Empty means not configured.
   final List<LearningTopic> focusTopics;
 
@@ -64,7 +79,8 @@ class AutomationSettings {
   });
 
   factory AutomationSettings.defaults() => const AutomationSettings(
-    enabled: true,
+    // With no settings row/focus selection, scheduled generation must be off.
+    enabled: false,
     maxArticlesPerRun: 3,
     maxDraftsPerDay: 3,
     monthlyDraftCap: 100,
@@ -117,7 +133,9 @@ class AutomationSettings {
         ).clamp(30, 365),
         lastManualRunAt: _asDate(map['last_manual_run_at']),
         focusTopics: List<LearningTopic>.unmodifiable(
-          ((map['focus_topics'] is List) ? map['focus_topics'] as List : const [])
+          ((map['focus_topics'] is List)
+                  ? map['focus_topics'] as List
+                  : const [])
               .map((item) => LearningTopicX.fromId(item.toString()))
               .whereType<LearningTopic>()
               .toSet(),
@@ -151,17 +169,17 @@ class QueueLifecycleStats {
   });
 
   factory QueueLifecycleStats.empty() => const QueueLifecycleStats(
-        pendingDrafts: 0,
-        pendingQuestions: 0,
-        archivedDrafts: 0,
-        expiringDraftsSoon: 0,
-        expiringQuestionsSoon: 0,
-        maxPendingDrafts: 30,
-        maxPendingQuestions: 100,
-        draftArchiveDays: 30,
-        rejectedDeleteDays: 7,
-        archivedDeleteDays: 90,
-      );
+    pendingDrafts: 0,
+    pendingQuestions: 0,
+    archivedDrafts: 0,
+    expiringDraftsSoon: 0,
+    expiringQuestionsSoon: 0,
+    maxPendingDrafts: 30,
+    maxPendingQuestions: 100,
+    draftArchiveDays: 30,
+    rejectedDeleteDays: 7,
+    archivedDeleteDays: 90,
+  );
 
   factory QueueLifecycleStats.fromMap(Map<String, dynamic> map) =>
       QueueLifecycleStats(
@@ -176,14 +194,8 @@ class QueueLifecycleStats {
           fallback: 100,
         ),
         draftArchiveDays: _asInt(map['draft_archive_days'], fallback: 30),
-        rejectedDeleteDays: _asInt(
-          map['rejected_delete_days'],
-          fallback: 7,
-        ),
-        archivedDeleteDays: _asInt(
-          map['archived_delete_days'],
-          fallback: 90,
-        ),
+        rejectedDeleteDays: _asInt(map['rejected_delete_days'], fallback: 7),
+        archivedDeleteDays: _asInt(map['archived_delete_days'], fallback: 90),
       );
 }
 
@@ -219,7 +231,8 @@ class GeneratedContentDraft {
   });
 
   factory GeneratedContentDraft.fromMap(Map<String, dynamic> map) {
-    final topic = LearningTopicX.fromId(map['topic_id']?.toString()) ??
+    final topic =
+        LearningTopicX.fromId(map['topic_id']?.toString()) ??
         LearningTopic.verification;
     final payload = map['draft_payload'];
     final payloadMap = payload is Map
@@ -283,16 +296,19 @@ class LearningContentHealth {
 
 List<String> _stringList(dynamic value) {
   if (value is! List) return const [];
-  return value.map((item) {
-    if (item is Map) {
-      final row = Map<String, dynamic>.from(item);
-      final title = row['title']?.toString().trim() ?? '';
-      if (title.isNotEmpty) return title;
-      final description = row['description']?.toString().trim() ?? '';
-      if (description.isNotEmpty) return description;
-    }
-    return item.toString();
-  }).where((item) => item.trim().isNotEmpty).toList(growable: false);
+  return value
+      .map((item) {
+        if (item is Map) {
+          final row = Map<String, dynamic>.from(item);
+          final title = row['title']?.toString().trim() ?? '';
+          if (title.isNotEmpty) return title;
+          final description = row['description']?.toString().trim() ?? '';
+          if (description.isNotEmpty) return description;
+        }
+        return item.toString();
+      })
+      .where((item) => item.trim().isNotEmpty)
+      .toList(growable: false);
 }
 
 int _asInt(dynamic value, {int fallback = 0}) {

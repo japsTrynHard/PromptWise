@@ -67,6 +67,7 @@ class AwarenessFeedController extends ChangeNotifier {
       return;
     }
     _scope = value;
+    _articles = const [];
     await refresh(refreshIfStale: false);
   }
 
@@ -75,18 +76,20 @@ class AwarenessFeedController extends ChangeNotifier {
       return;
     }
     _category = value;
+    _articles = const [];
     await refresh(refreshIfStale: false);
   }
 
   Future<void> refresh({bool refreshIfStale = true}) async {
     final service = _service;
     final userId = _userId;
-    if (service == null || userId == null || _isLoading) {
+    if (service == null || userId == null || _disposed) {
       return;
     }
 
     final generation = ++_generation;
     _isLoading = true;
+    _isRefreshing = false;
     _errorMessage = null;
     notifyListeners();
 
@@ -127,6 +130,7 @@ class AwarenessFeedController extends ChangeNotifier {
     }
     final generation = ++_generation;
     _isRefreshing = true;
+    _isLoading = false;
     _errorMessage = null;
     notifyListeners();
     try {
@@ -180,6 +184,7 @@ class AwarenessFeedController extends ChangeNotifier {
     final scope = _scope;
     final category = _category;
     _isRefreshing = true;
+    _isLoading = false;
     _errorMessage = null;
     notifyListeners();
 
@@ -239,6 +244,7 @@ class AwarenessFeedController extends ChangeNotifier {
     }
 
     _isRefreshing = true;
+    _isLoading = false;
     final generation = ++_generation;
     _errorMessage = null;
     notifyListeners();

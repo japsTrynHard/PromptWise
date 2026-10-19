@@ -283,9 +283,7 @@ class AdaptiveLearningController extends ChangeNotifier {
     // Remote attempt history was already loaded by the adaptive state refresh.
     // Reuse the remembered item/topic keys instead of issuing another history
     // query every time Provider notifies about unchanged content/progress.
-    final existingItemTopics = <String>{
-      ..._lastCountedAttemptByItemTopic.keys,
-    };
+    final existingItemTopics = <String>{..._lastCountedAttemptByItemTopic.keys};
     var importedAny = false;
 
     for (final quiz in completed) {
@@ -323,7 +321,9 @@ class AdaptiveLearningController extends ChangeNotifier {
       throw StateError('The diagnostic assessment is already being saved.');
     }
     if (answers.length < diagnosticQuestions.length) {
-      throw ArgumentError('Answer every diagnostic question before submitting.');
+      throw ArgumentError(
+        'Answer every diagnostic question before submitting.',
+      );
     }
 
     _isSubmittingDiagnostic = true;
@@ -334,10 +334,14 @@ class AdaptiveLearningController extends ChangeNotifier {
     final topicResults = <LearningTopic, bool>{};
     for (final question in diagnosticQuestions) {
       final selected = answers[question.id];
-      if (selected == null) {
+      if (selected == null ||
+          selected < 0 ||
+          selected >= question.options.length) {
         _isSubmittingDiagnostic = false;
         notifyListeners();
-        throw ArgumentError('Answer every diagnostic question before submitting.');
+        throw ArgumentError(
+          'Answer every diagnostic question before submitting.',
+        );
       }
       final isCorrect = selected == question.correctIndex;
       if (isCorrect) correct++;
@@ -367,7 +371,9 @@ class AdaptiveLearningController extends ChangeNotifier {
 
         if (!accepted) {
           await _loadRemoteState(userId, preserveLocalNewerState: false);
-          throw StateError('The diagnostic assessment has already been completed.');
+          throw StateError(
+            'The diagnostic assessment has already been completed.',
+          );
         }
       }
 
@@ -433,7 +439,9 @@ class AdaptiveLearningController extends ChangeNotifier {
     bool countedForMastery = true,
   }) async {
     final normalizedItemId = itemId.trim();
-    final normalizedType = attemptType.trim().isEmpty ? 'quiz' : attemptType.trim();
+    final normalizedType = attemptType.trim().isEmpty
+        ? 'quiz'
+        : attemptType.trim();
     if (normalizedItemId.isEmpty) return false;
 
     final occurredAt = DateTime.now();
@@ -447,7 +455,8 @@ class AdaptiveLearningController extends ChangeNotifier {
     final userId = _activeUserId;
     final repository = _repository;
     final hasCloudAuthority = userId != null && repository != null;
-    var shouldCount = countedForMastery &&
+    var shouldCount =
+        countedForMastery &&
         (hasCloudAuthority ||
             _isLocallyEligibleForMastery(
               itemTopicKey: itemTopicKey,
@@ -472,7 +481,8 @@ class AdaptiveLearningController extends ChangeNotifier {
       } catch (_) {
         // When cloud saving fails, use the same local eligibility rule instead
         // of blindly counting the attempt and risking offline score farming.
-        shouldCount = countedForMastery &&
+        shouldCount =
+            countedForMastery &&
             _isLocallyEligibleForMastery(
               itemTopicKey: itemTopicKey,
               topic: topic,
@@ -560,11 +570,10 @@ class AdaptiveLearningController extends ChangeNotifier {
         ? const <LearningTopic, TopicMastery>{}
         : _rebuildFromHistory(diagnostics, countedAttempts);
     final hasHistory = diagnostics.isNotEmpty || countedAttempts.isNotEmpty;
-    final remoteByTopic = {
-      for (final item in remoteMastery) item.topic: item,
-    };
-    final hasPendingDiagnostic =
-        _storage.getString(_pendingDiagnosticKey(userId)).isNotEmpty;
+    final remoteByTopic = {for (final item in remoteMastery) item.topic: item};
+    final hasPendingDiagnostic = _storage
+        .getString(_pendingDiagnosticKey(userId))
+        .isNotEmpty;
     final hasPendingLocal =
         _storage.getString(_pendingAttemptsKey(userId)).isNotEmpty ||
         hasPendingDiagnostic;
@@ -573,8 +582,8 @@ class AdaptiveLearningController extends ChangeNotifier {
       var chosen = remoteState.canonical
           ? remoteByTopic[topic] ?? TopicMastery.initial(topic)
           : hasHistory
-              ? rebuilt[topic] ?? TopicMastery.initial(topic)
-              : remoteByTopic[topic] ?? TopicMastery.initial(topic);
+          ? rebuilt[topic] ?? TopicMastery.initial(topic)
+          : remoteByTopic[topic] ?? TopicMastery.initial(topic);
 
       // History is the canonical source whenever it exists. Aggregate rows
       // may have been produced by an older buggy build and must not override
@@ -596,7 +605,8 @@ class AdaptiveLearningController extends ChangeNotifier {
     // Once cloud state is available, a stale legacy local flag must not claim
     // the diagnostic exists. Preserve local completion only while a real
     // offline diagnostic payload is still waiting to sync.
-    _diagnosticCompleted = remoteState.diagnosticCompleted ||
+    _diagnosticCompleted =
+        remoteState.diagnosticCompleted ||
         diagnostics.isNotEmpty ||
         (hasPendingDiagnostic && _diagnosticCompleted);
 
@@ -870,9 +880,7 @@ class AdaptiveLearningController extends ChangeNotifier {
         final decoded = jsonDecode(raw);
         if (decoded is List) {
           for (final value in decoded.whereType<Map>()) {
-            final item = TopicMastery.fromMap(
-              Map<String, dynamic>.from(value),
-            );
+            final item = TopicMastery.fromMap(Map<String, dynamic>.from(value));
             _mastery[item.topic] = item;
           }
         }
@@ -883,16 +891,10 @@ class AdaptiveLearningController extends ChangeNotifier {
     final currentDiagnostic =
         _storage.getInt(_diagnosticKey(userId), defaultValue: 0) == 1;
     final v2Diagnostic =
-        _storage.getInt(
-          'user:$userId:diagnosticCompleteV2',
-          defaultValue: 0,
-        ) ==
+        _storage.getInt('user:$userId:diagnosticCompleteV2', defaultValue: 0) ==
         1;
     final legacyDiagnostic =
-        _storage.getInt(
-          'user:$userId:diagnosticCompleteV1',
-          defaultValue: 0,
-        ) ==
+        _storage.getInt('user:$userId:diagnosticCompleteV1', defaultValue: 0) ==
         1;
     _diagnosticCompleted =
         currentDiagnostic || v2Diagnostic || legacyDiagnostic;
@@ -974,11 +976,17 @@ class AdaptiveLearningController extends ChangeNotifier {
     List<Quiz> quizzes,
     Map<String, int> bestScores,
   ) {
-    final parts = quizzes
-        .where((quiz) => quiz.topic != null && (bestScores[quiz.id] ?? 0) >= 100)
-        .map((quiz) => '${quiz.id}:${quiz.topic!.id}:${bestScores[quiz.id] ?? 0}')
-        .toList(growable: false)
-      ..sort();
+    final parts =
+        quizzes
+            .where(
+              (quiz) => quiz.topic != null && (bestScores[quiz.id] ?? 0) >= 100,
+            )
+            .map(
+              (quiz) =>
+                  '${quiz.id}:${quiz.topic!.id}:${bestScores[quiz.id] ?? 0}',
+            )
+            .toList(growable: false)
+          ..sort();
     return parts.join('|');
   }
 

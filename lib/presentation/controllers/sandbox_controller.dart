@@ -250,7 +250,7 @@ class SandboxController extends ChangeNotifier {
     required String learnerRank,
     LearningTopic? focusTopic,
   }) async {
-    if (_disposed) return false;
+    if (_disposed || _isLoading) return false;
     final operationUserId = _activeUserId;
     final operationEpoch = _requestEpoch;
     final cleanedPrompt = prompt.trim();
@@ -385,6 +385,7 @@ class SandboxController extends ChangeNotifier {
   }
 
   String? validatePrompt(String prompt) {
+    prompt = prompt.trim();
     if (prompt.isEmpty) {
       return 'Enter a prompt before requesting feedback.';
     }
@@ -405,6 +406,8 @@ class SandboxController extends ChangeNotifier {
 
   void startNewSession() {
     if (_disposed) return;
+    _requestEpoch++;
+    _isHistoryLoading = false;
     _activeSessionId = null;
     _resetSessionState(notify: true);
   }

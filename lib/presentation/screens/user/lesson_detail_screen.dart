@@ -32,10 +32,22 @@ class _LessonDetailScreenState extends State<LessonDetailScreen> {
     if (_isSaving) return;
 
     setState(() => _isSaving = true);
-    await context.read<ProgressController>().completeLesson(widget.lesson.id);
+    final progress = context.read<ProgressController>();
+    final saved = await progress.completeLesson(widget.lesson.id);
 
     if (!mounted) return;
     setState(() => _isSaving = false);
+    if (!saved) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            progress.errorMessage ??
+                'Lesson progress could not be saved. Please try again.',
+          ),
+        ),
+      );
+      return;
+    }
 
     final topic = widget.lesson.topic;
     if (topic != null) {
@@ -44,6 +56,7 @@ class _LessonDetailScreenState extends State<LessonDetailScreen> {
         AppRoutes.adaptiveKnowledgeCheck,
         arguments: AdaptiveKnowledgeCheckArgs(
           focusTopic: topic,
+          mode: 'focused',
           questionCount: 6,
         ),
       );
@@ -55,6 +68,14 @@ class _LessonDetailScreenState extends State<LessonDetailScreen> {
     );
     if (quiz != null && mounted) {
       await Navigator.pushNamed(context, AppRoutes.quiz, arguments: quiz);
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Linked practice is unavailable. Return to Learning Studio or try again later.',
+          ),
+        ),
+      );
     }
   }
 
@@ -286,9 +307,9 @@ class _MetaPill extends StatelessWidget {
           const SizedBox(width: AppSpacing.xs),
           Text(
             label,
-            style: Theme.of(context).textTheme.labelMedium?.copyWith(
-              fontWeight: FontWeight.w700,
-            ),
+            style: Theme.of(
+              context,
+            ).textTheme.labelMedium?.copyWith(fontWeight: FontWeight.w700),
           ),
         ],
       ),
@@ -445,11 +466,7 @@ class _LessonRoadmapCard extends StatelessWidget {
           ),
           const SizedBox(height: AppSpacing.md),
           if (document.intro.isNotEmpty)
-            _RoadmapLine(
-              number: 0,
-              label: 'Overview',
-              emphasized: true,
-            ),
+            _RoadmapLine(number: 0, label: 'Overview', emphasized: true),
           for (var index = 0; index < concepts.length; index++)
             _RoadmapLine(number: index + 1, label: concepts[index].title),
           if (document.hasScenario)
@@ -642,7 +659,10 @@ class _IntroCard extends StatelessWidget {
               color: theme.colorScheme.primaryContainer,
               borderRadius: BorderRadius.circular(AppRadius.md),
             ),
-            child: Icon(Icons.explore_outlined, color: theme.colorScheme.primary),
+            child: Icon(
+              Icons.explore_outlined,
+              color: theme.colorScheme.primary,
+            ),
           ),
           const SizedBox(width: AppSpacing.md),
           Expanded(
@@ -920,7 +940,9 @@ class _LessonActionCard extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                isCompleted ? 'Ready for another challenge?' : 'Ready to prove it?',
+                isCompleted
+                    ? 'Ready for another challenge?'
+                    : 'Ready to prove it?',
                 style: theme.textTheme.titleLarge?.copyWith(
                   color: theme.colorScheme.onPrimary,
                   fontWeight: FontWeight.w800,
@@ -992,18 +1014,18 @@ class _LessonSection {
   final List<String> items;
 
   const _LessonSection.concept({required this.title, required this.body})
-      : type = _LessonSectionType.concept,
-        items = const [];
+    : type = _LessonSectionType.concept,
+      items = const [];
 
   const _LessonSection.scenario(this.body)
-      : type = _LessonSectionType.scenario,
-        title = 'Applied scenario',
-        items = const [];
+    : type = _LessonSectionType.scenario,
+      title = 'Applied scenario',
+      items = const [];
 
   const _LessonSection.takeaways(this.items)
-      : type = _LessonSectionType.takeaways,
-        title = 'Key takeaways',
-        body = '';
+    : type = _LessonSectionType.takeaways,
+      title = 'Key takeaways',
+      body = '';
 }
 
 class _LessonDocument {
@@ -1012,8 +1034,9 @@ class _LessonDocument {
 
   const _LessonDocument({required this.intro, required this.sections});
 
-  int get conceptCount =>
-      sections.where((section) => section.type == _LessonSectionType.concept).length;
+  int get conceptCount => sections
+      .where((section) => section.type == _LessonSectionType.concept)
+      .length;
 
   bool get hasScenario =>
       sections.any((section) => section.type == _LessonSectionType.scenario);
@@ -1041,8 +1064,10 @@ class _LessonDocument {
           .toList();
       if (lines.isEmpty) continue;
 
-      if (RegExp(r'^LEVEL\s+\d+\s*:', caseSensitive: false)
-          .hasMatch(lines.first)) {
+      if (RegExp(
+        r'^LEVEL\s+\d+\s*:',
+        caseSensitive: false,
+      ).hasMatch(lines.first)) {
         if (lines.length == 1) continue;
         lines.removeAt(0);
         if (lines.isEmpty) continue;
@@ -1096,10 +1121,7 @@ class _LessonDocument {
           sections.add(_LessonSection.scenario(bodyLines.join(' ')));
         } else {
           sections.add(
-            _LessonSection.concept(
-              title: first,
-              body: bodyLines.join(' '),
-            ),
+            _LessonSection.concept(title: first, body: bodyLines.join(' ')),
           );
         }
         continue;
@@ -1134,23 +1156,19 @@ class _LessonDocument {
       sections.add(
         _LessonSection.concept(
           title: pendingHeading,
-          body: 'Review this idea and connect it to the lesson objective above.',
+          body:
+              'Review this idea and connect it to the lesson objective above.',
         ),
       );
     }
 
-    return _LessonDocument(
-      intro: intro,
-      sections: List.unmodifiable(sections),
-    );
+    return _LessonDocument(intro: intro, sections: List.unmodifiable(sections));
   }
 
   static List<String> _extractBullets(Iterable<String> lines) {
     final result = <String>[];
     for (final line in lines) {
-      final cleaned = line
-          .replaceFirst(RegExp(r'^[-•]\s*'), '')
-          .trim();
+      final cleaned = line.replaceFirst(RegExp(r'^[-•]\s*'), '').trim();
       if (cleaned.isNotEmpty) result.add(cleaned);
     }
     return result;

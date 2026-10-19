@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 
 import '../../data/models/image_comparison.dart';
 import '../../data/services/verification_media_service.dart';
+import 'image_round_readiness.dart';
 
 class ImageComparisonController extends ChangeNotifier {
   ImageComparisonController({VerificationMediaGateway? service})
@@ -23,6 +24,7 @@ class ImageComparisonController extends ChangeNotifier {
   Future<bool>? _roundLoadInFlight;
 
   final Set<String> _seenIds = <String>{};
+  final Set<String> _attemptsInFlight = <String>{};
 
   bool get isLoading => _isLoading;
 
@@ -55,6 +57,7 @@ class ImageComparisonController extends ChangeNotifier {
     _isLoading = false;
 
     _seenIds.clear();
+    _attemptsInFlight.clear();
 
     notifyListeners();
   }
@@ -77,11 +80,24 @@ class ImageComparisonController extends ChangeNotifier {
   Future<ImageComparisonAttemptResult?> submitAttempt({
     required String roundId,
     required String selectedSide,
+    required ImageRoundReadiness readiness,
   }) async {
     final service = _service;
     final userId = _activeUserId;
     final epoch = _requestEpoch;
-    if (service == null || userId == null) return null;
+    final attemptKey = '$epoch:$roundId';
+    // Revalidate at the controller boundary: the screen's disabled buttons
+    // alone cannot guard programmatic calls, slow images or repeated taps.
+    if (service == null ||
+        userId == null ||
+        _isLoading ||
+        !readiness.canSubmit ||
+        readiness.roundId != roundId ||
+        (selectedSide != 'A' && selectedSide != 'B') ||
+        !_rounds.any((round) => round.id == roundId) ||
+        !_attemptsInFlight.add(attemptKey)) {
+      return null;
+    }
     if (_errorMessage != null) {
       _errorMessage = null;
       notifyListeners();
@@ -103,6 +119,8 @@ class ImageComparisonController extends ChangeNotifier {
         notifyListeners();
       }
       return null;
+    } finally {
+      _attemptsInFlight.remove(attemptKey);
     }
   }
 

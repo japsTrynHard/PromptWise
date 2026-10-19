@@ -35,6 +35,49 @@ class _SurveyFake implements LearningSurveyGateway {
 }
 
 void main() {
+  test('TC_SURVEY_NEG_001 a fourth interest cannot be saved', () async {
+    final fake = _SurveyFake();
+    final c = LearningSurveyController(repository: fake);
+    addTearDown(c.dispose);
+    await c.bindUser('learner');
+    expect(
+      await c.submit(
+        LearningSurvey(
+          interests: LearningTopic.values.take(4).toSet(),
+          experienceLevel: 'beginner',
+          learningGoal: 'verify_information',
+        ),
+      ),
+      false,
+    );
+    expect(fake.rows, isEmpty);
+  });
+
+  test(
+    'TC_SURVEY_POS_003/NEG_003 failed edit preserves saved answers and retries',
+    () async {
+      final fake = _SurveyFake();
+      final c = LearningSurveyController(repository: fake);
+      addTearDown(c.dispose);
+      await c.bindUser('learner');
+      await c.submit(_valid);
+      const edited = LearningSurvey(
+        interests: {LearningTopic.context, LearningTopic.specificity},
+        experienceLevel: 'beginner',
+        learningGoal: 'write_better_prompts',
+      );
+      fake.failSave = true;
+      expect(await c.submit(edited), false);
+      expect(c.survey, same(_valid));
+      expect(fake.rows['learner'], same(_valid));
+      fake.failSave = false;
+      expect(await c.submit(edited), true);
+      await c.retry();
+      expect(c.survey!.interests, edited.interests);
+      expect(c.errorMessage, isNull);
+    },
+  );
+
   test('new learner starts without stored answers', () async {
     final c = LearningSurveyController(repository: _SurveyFake());
     await c.bindUser('new');

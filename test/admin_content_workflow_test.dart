@@ -31,6 +31,153 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
+  testWidgets(
+    'TC_CONTENT_POS/NEG_002/005 search recovers and deletion requires confirmation',
+    (tester) async {
+      tester.view.physicalSize = const Size(800, 1400);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final repo = _ContentRepository()..rows = [module, draft];
+      final content = ContentController(repository: repo);
+      addTearDown(content.dispose);
+      await content.bindAuthenticatedUser('admin', isAdministrator: true);
+      await tester.pumpWidget(
+        ChangeNotifierProvider.value(
+          value: content,
+          child: const MaterialApp(
+            home: Scaffold(body: AdminContentManagementScreen()),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byType(DropdownButtonFormField<ContentStatus?>));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Draft').last);
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byType(TextField),
+        'zz_nonexistent_topic_948',
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('No matching content'), findsOneWidget);
+      expect(repo.rows, hasLength(2));
+      await tester.tap(find.byTooltip('Clear search'));
+      await tester.pumpAndSettle();
+      expect(find.text(draft.title), findsOneWidget);
+      await tester.tap(find.byTooltip('Content actions'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Delete draft'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      expect(repo.deleted, isEmpty);
+      expect(find.text(draft.title), findsOneWidget);
+      await tester.tap(find.byTooltip('Content actions'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Delete draft'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(FilledButton, 'Delete draft'));
+      await tester.pumpAndSettle();
+      expect(repo.deleted, [draft.id]);
+      expect(repo.rows.map((row) => row.id), [module.id]);
+    },
+  );
+
+  testWidgets(
+    'TC_CONTENT_NEG_001 empty required lesson fields never create a record',
+    (tester) async {
+      final repo = _ContentRepository()..rows = [module];
+      final content = ContentController(repository: repo);
+      addTearDown(content.dispose);
+      await content.bindAuthenticatedUser('admin', isAdministrator: true);
+      await tester.pumpWidget(
+        ChangeNotifierProvider.value(
+          value: content,
+          child: const MaterialApp(
+            home: Scaffold(body: AdminContentManagementScreen()),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final createContent = find.widgetWithText(FilledButton, 'Create content');
+      await tester.ensureVisible(createContent);
+      await tester.pumpAndSettle();
+      await tester.tap(createContent);
+      await tester.pumpAndSettle();
+      final type = find.descendant(
+        of: find.byType(Dialog),
+        matching: find.byType(DropdownButtonFormField<ContentType>),
+      );
+      await tester.tap(type);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Lesson').last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Create').last);
+      await tester.pumpAndSettle();
+      expect(repo.rows.map((row) => row.id), [module.id]);
+      expect(find.byType(Dialog), findsOneWidget);
+      expect(find.text('Enter a title.'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'TC_CONTENT_NEG_003 invalid edited date order preserves saved content',
+    (tester) async {
+      tester.view.physicalSize = const Size(800, 1400);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final original = draft.copyWith(
+        estimatedMinutes: 2,
+        publicationDate: DateTime(2026, 9, 20),
+        reviewDate: DateTime(2026, 10, 20),
+      );
+      final repo = _ContentRepository()..rows = [module, original];
+      final content = ContentController(repository: repo);
+      addTearDown(content.dispose);
+      await content.bindAuthenticatedUser('admin', isAdministrator: true);
+      await tester.pumpWidget(
+        ChangeNotifierProvider.value(
+          value: content,
+          child: const MaterialApp(
+            home: Scaffold(body: AdminContentManagementScreen()),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), draft.title);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Content actions'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Edit'));
+      await tester.pumpAndSettle();
+      final selectDate = find.byTooltip('Select Review date');
+      await tester.ensureVisible(selectDate);
+      await tester.tap(selectDate);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Switch to input'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.descendant(
+          of: find.byType(InputDatePickerFormField),
+          matching: find.byType(TextFormField),
+        ),
+        '09/01/2026',
+      );
+      await tester.tap(find.text('OK'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Save changes'));
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Review date cannot be earlier than publication date.'),
+        findsOneWidget,
+      );
+      expect(repo.rows.last.reviewDate, original.reviewDate);
+      expect(repo.rows.last.body, original.body);
+    },
+  );
+
   test(
     'admin creates, edits, publishes, archives, and deletes draft content',
     () async {

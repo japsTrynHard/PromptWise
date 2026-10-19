@@ -48,9 +48,7 @@ class VerificationMediaService implements VerificationMediaGateway {
         'Image examples are taking too long to load. Please try again.',
       );
     } on FunctionException catch (error) {
-      throw VerificationMediaException(
-        _functionErrorMessage(error.details),
-      );
+      throw VerificationMediaException(_functionErrorMessage(error.details));
     }
 
     final data = response.data;
@@ -89,12 +87,16 @@ class VerificationMediaService implements VerificationMediaGateway {
       }
     }
 
-    if (rounds.length < 2) {
+    final uniqueRounds = {
+      for (final round in rounds) round.id: round,
+    }.values.toList();
+    final requiredCount = count.clamp(3, 8);
+    if (uniqueRounds.length < requiredCount) {
       throw const VerificationMediaException(
         'Not enough fresh image examples were available. Try again in a moment.',
       );
     }
-    return List.unmodifiable(rounds);
+    return List.unmodifiable(uniqueRounds.take(requiredCount));
   }
 
   @override

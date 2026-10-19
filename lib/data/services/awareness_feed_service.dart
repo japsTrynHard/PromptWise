@@ -192,6 +192,8 @@ class AwarenessFeedService {
 
   List<AwarenessArticle> _mapAwarenessRows(List<dynamic> rows) {
     final articles = <AwarenessArticle>[];
+    final seenIds = <String>{};
+    final seenUrls = <String>{};
     for (final raw in rows) {
       if (raw is! Map) {
         continue;
@@ -209,6 +211,16 @@ class AwarenessFeedService {
       if (!_isAiAwarenessArticle(article)) {
         continue;
       }
+      final source = Uri.tryParse(article.sourceUrl.trim());
+      if (source == null ||
+          !{'http', 'https'}.contains(source.scheme) ||
+          source.host.isEmpty ||
+          seenIds.contains(article.id) ||
+          seenUrls.contains(source.toString())) {
+        continue;
+      }
+      seenIds.add(article.id);
+      seenUrls.add(source.toString());
       articles.add(article);
     }
     return List.unmodifiable(articles);
@@ -332,6 +344,7 @@ class AwarenessFeedService {
 
   Future<String> forceRefresh() async {
     final result = await _invokeRefresh(action: 'force_refresh');
+    if (result.warning != null) throw AwarenessFeedException(result.warning!);
     if (result.refreshed) {
       _invalidateCache();
     }
@@ -341,6 +354,7 @@ class AwarenessFeedService {
 
   Future<String> checkForUpdates() async {
     final result = await _invokeRefresh(action: 'manual_check');
+    if (result.warning != null) throw AwarenessFeedException(result.warning!);
     if (result.refreshed) {
       _invalidateCache();
     } else {
@@ -429,6 +443,11 @@ class AwarenessFeedService {
       );
     }
     if (decoded is Map) {
+      if (decoded['success'] is! bool) {
+        throw const AwarenessFeedException(
+          'Awareness updates returned an unreadable response. Please try again.',
+        );
+      }
       final warning = decoded['warning']?.toString().trim();
       final activeCount =
           int.tryParse(decoded['activeCount']?.toString() ?? '') ?? 0;
@@ -437,6 +456,12 @@ class AwarenessFeedService {
           decoded['message']?.toString().trim() ?? 'Awareness feed refreshed.';
       if (!success && warning?.isNotEmpty == true && activeCount <= 0) {
         throw AwarenessFeedException(warning!);
+      }
+      if (!success && warning?.isNotEmpty != true) {
+        throw AwarenessFeedException(
+          decoded['error']?.toString() ??
+              'Awareness updates could not be refreshed. Please try again.',
+        );
       }
       final lastSuccessfulAt = DateTime.tryParse(
         decoded['lastSuccessAt']?.toString() ?? '',
@@ -452,10 +477,8 @@ class AwarenessFeedService {
         lastSuccessfulAt: lastSuccessfulAt,
       );
     }
-    return const _AwarenessRefreshResult(
-      message: 'Awareness feed refreshed.',
-      activeCount: 0,
-      refreshed: false,
+    throw const AwarenessFeedException(
+      'Awareness updates returned an unreadable response. Please try again.',
     );
   }
 

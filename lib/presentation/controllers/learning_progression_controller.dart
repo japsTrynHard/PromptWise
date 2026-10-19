@@ -230,6 +230,16 @@ class LearningProgressionController extends ChangeNotifier {
         mode: mode,
       );
       if (!_isCurrent(userId, epoch)) return false;
+      if (mode == 'focused' &&
+          focusTopic != null &&
+          (session.questions.isEmpty ||
+              session.questions.any(
+                (question) => question.topic != focusTopic,
+              ))) {
+        throw StateError(
+          'Practice for this lesson topic is unavailable. Return to Learning Studio or try again later.',
+        );
+      }
       _session = session;
       _questionIndex = 0;
       return true;
@@ -411,6 +421,9 @@ class LearningProgressionController extends ChangeNotifier {
 
   String _friendlyMessage(Object error) {
     final text = error.toString().toLowerCase();
+    if (text.contains('practice for this lesson topic is unavailable')) {
+      return 'Practice for this lesson topic is unavailable. Return to Learning Studio or try again later.';
+    }
     if (text.contains('no eligible') || text.contains('no question')) {
       return 'No adaptive questions are available for this learning state yet.';
     }

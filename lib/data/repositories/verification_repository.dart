@@ -10,7 +10,9 @@ class VerificationRepository {
   Future<List<VerificationSubskillMastery>> fetchSubskillMastery() async {
     final response = await _client
         .from('verification_subskill_mastery')
-        .select('subskill,mastery,attempts,successful_attempts,last_practiced_at,next_review_at')
+        .select(
+          'subskill,mastery,attempts,successful_attempts,last_practiced_at,next_review_at',
+        )
         .order('subskill');
     final result = <VerificationSubskillMastery>[];
     for (final row in response as List) {
@@ -39,8 +41,13 @@ class VerificationRepository {
       },
     );
     final session = VerificationSession.fromMap(_jsonMap(response));
-    if (session.id.isEmpty || session.cases.isEmpty) {
-      throw StateError('No eligible verification cases are available right now.');
+    if (session.id.isEmpty ||
+        session.cases.length != caseCount.clamp(4, 10) ||
+        session.cases.map((item) => item.id).toSet().length !=
+            session.cases.length) {
+      throw StateError(
+        'No eligible verification cases are available right now.',
+      );
     }
     return session;
   }
@@ -79,7 +86,9 @@ class VerificationRepository {
   Future<List<VerificationCaseDraft>> fetchDrafts() async {
     final response = await _client
         .from('verification_case_drafts')
-        .select('id,title,summary,draft_payload,source_name,source_url,source_published_at,created_at,status')
+        .select(
+          'id,title,summary,draft_payload,source_name,source_url,source_published_at,created_at,status',
+        )
         .eq('status', 'draft')
         .order('created_at', ascending: false)
         .limit(100);
@@ -87,9 +96,7 @@ class VerificationRepository {
     for (final row in response as List) {
       try {
         result.add(
-          VerificationCaseDraft.fromMap(
-            Map<String, dynamic>.from(row as Map),
-          ),
+          VerificationCaseDraft.fromMap(Map<String, dynamic>.from(row as Map)),
         );
       } on FormatException {
         // Ignore malformed AI drafts instead of breaking admin access.
@@ -105,9 +112,7 @@ class VerificationRepository {
     for (final row in rows) {
       if (row is! Map) continue;
       try {
-        result.add(
-          VerificationCase.fromMap(Map<String, dynamic>.from(row)),
-        );
+        result.add(VerificationCase.fromMap(Map<String, dynamic>.from(row)));
       } on FormatException {
         // Ignore malformed cases so the rest of the bank remains manageable.
       }

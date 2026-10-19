@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -22,6 +24,7 @@ class VerificationSessionScreen extends StatefulWidget {
 class _VerificationSessionScreenState extends State<VerificationSessionScreen> {
   VerificationDecision? _decision;
   String? _caseId;
+  bool _confirmingLeave = false;
 
   void _syncCase(VerificationCase? current) {
     if (_caseId == current?.id) return;
@@ -32,9 +35,9 @@ class _VerificationSessionScreenState extends State<VerificationSessionScreen> {
   Future<void> _submit(VerificationController controller) async {
     final selected = _decision;
     if (selected == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Pick one answer first.')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Pick one answer first.')));
       return;
     }
     final result = await controller.submitCurrentGuess(decision: selected);
@@ -82,7 +85,7 @@ class _VerificationSessionScreenState extends State<VerificationSessionScreen> {
       ),
     );
     if (confirmed != true) return false;
-    await controller.abandonSession();
+    unawaited(controller.abandonSession());
     return true;
   }
 
@@ -93,12 +96,17 @@ class _VerificationSessionScreenState extends State<VerificationSessionScreen> {
     _syncCase(current);
 
     return PopScope(
-      canPop: controller.isComplete,
+      canPop: controller.isComplete || controller.session == null,
       onPopInvokedWithResult: (didPop, _) async {
-        if (didPop) return;
+        if (didPop || _confirmingLeave) return;
+        _confirmingLeave = true;
         final canLeave = await _confirmLeave(controller);
+        _confirmingLeave = false;
         if (!context.mounted || !canLeave) return;
-        Navigator.pop(context);
+        // Allow PopScope to observe the cleared session before popping.
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) Navigator.pop(context);
+        });
       },
       child: Scaffold(
         appBar: const PromptWiseAppBar(
@@ -111,21 +119,22 @@ class _VerificationSessionScreenState extends State<VerificationSessionScreen> {
           child: controller.summary != null
               ? _SummaryView(summary: controller.summary!)
               : current == null
-                  ? StateMessage.error(
-                      title: 'This check could not open',
-                      message: controller.errorMessage ??
-                          'There is no item to show right now.',
-                      actionLabel: 'Go back',
-                      onAction: () => Navigator.pop(context),
-                    )
-                  : _QuestionView(
-                      current: current,
-                      controller: controller,
-                      decision: _decision,
-                      onChanged: (value) => setState(() => _decision = value),
-                      onSubmit: () => _submit(controller),
-                      onNext: () => _next(controller),
-                    ),
+              ? StateMessage.error(
+                  title: 'This check could not open',
+                  message:
+                      controller.errorMessage ??
+                      'There is no item to show right now.',
+                  actionLabel: 'Go back',
+                  onAction: () => Navigator.pop(context),
+                )
+              : _QuestionView(
+                  current: current,
+                  controller: controller,
+                  decision: _decision,
+                  onChanged: (value) => setState(() => _decision = value),
+                  onSubmit: () => _submit(controller),
+                  onNext: () => _next(controller),
+                ),
         ),
       ),
     );
@@ -280,7 +289,9 @@ class _QuestionView extends StatelessWidget {
                   child: FilledButton.icon(
                     onPressed: controller.isCompleting ? null : onNext,
                     icon: const Icon(Icons.arrow_forward_rounded),
-                    label: Text(index == total ? 'See results' : 'Next question'),
+                    label: Text(
+                      index == total ? 'See results' : 'Next question',
+                    ),
                   ),
                 ),
               ],
@@ -378,7 +389,9 @@ class _FeedbackCard extends StatelessWidget {
               const SizedBox(width: AppSpacing.sm),
               Expanded(
                 child: Text(
-                  correct ? 'Nice — that is the best answer.' : 'Not quite — here is why.',
+                  correct
+                      ? 'Nice — that is the best answer.'
+                      : 'Not quite — here is why.',
                   style: theme.textTheme.titleMedium?.copyWith(
                     fontWeight: FontWeight.w700,
                   ),
@@ -395,12 +408,17 @@ class _FeedbackCard extends StatelessWidget {
               ),
             ),
           if (!correct) const SizedBox(height: AppSpacing.sm),
-          Text(feedback.explanation, style: theme.textTheme.bodyMedium?.copyWith(height: 1.5)),
+          Text(
+            feedback.explanation,
+            style: theme.textTheme.bodyMedium?.copyWith(height: 1.5),
+          ),
           if (feedback.learningPoint.trim().isNotEmpty) ...[
             const SizedBox(height: AppSpacing.md),
             Text(
               'Simple tip: ${feedback.learningPoint}',
-              style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+              style: theme.textTheme.bodyMedium?.copyWith(
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ],
           const SizedBox(height: AppSpacing.sm),
@@ -439,14 +457,22 @@ class _SummaryView extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               AppCard(
-                backgroundColor: theme.colorScheme.primaryContainer.withValues(alpha: 0.45),
+                backgroundColor: theme.colorScheme.primaryContainer.withValues(
+                  alpha: 0.45,
+                ),
                 child: Column(
                   children: [
-                    Icon(Icons.fact_check_rounded, size: 48, color: theme.colorScheme.primary),
+                    Icon(
+                      Icons.fact_check_rounded,
+                      size: 48,
+                      color: theme.colorScheme.primary,
+                    ),
                     const SizedBox(height: AppSpacing.md),
                     Text(
                       'Quick check complete',
-                      style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
+                      style: theme.textTheme.headlineSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                     const SizedBox(height: AppSpacing.sm),
                     Text(
@@ -479,7 +505,10 @@ class _SummaryView extends StatelessWidget {
                     child: const Text('Back to Verify'),
                   ),
                   FilledButton.icon(
-                    onPressed: () => Navigator.pushNamed(context, AppRoutes.adaptiveLearning),
+                    onPressed: () => Navigator.pushNamed(
+                      context,
+                      AppRoutes.adaptiveLearning,
+                    ),
                     icon: const Icon(Icons.route_outlined),
                     label: const Text('Open my learning path'),
                   ),
@@ -534,19 +563,20 @@ List<VerificationDecision> _choicesFor(VerificationCase item) {
   if (!base.contains(item.correctDecision)) {
     base[base.length - 1] = item.correctDecision;
   }
-  if (item.difficulty.level >= 4 && !base.contains(VerificationDecision.unverified)) {
+  if (item.difficulty.level >= 4 &&
+      !base.contains(VerificationDecision.unverified)) {
     base.add(VerificationDecision.unverified);
   }
   return List<VerificationDecision>.unmodifiable(base.toSet());
 }
 
 String _difficultyText(int level) => switch (level.clamp(1, 5)) {
-      1 => 'Easy',
-      2 => 'Easy+',
-      3 => 'Medium',
-      4 => 'Hard',
-      _ => 'Challenge',
-    };
+  1 => 'Easy',
+  2 => 'Easy+',
+  3 => 'Medium',
+  4 => 'Hard',
+  _ => 'Challenge',
+};
 
 String _shorten(String value, int max) {
   final text = value.replaceAll(RegExp(r'\s+'), ' ').trim();
@@ -555,10 +585,10 @@ String _shorten(String value, int max) {
 }
 
 IconData _caseIcon(VerificationCaseType type) => switch (type) {
-      VerificationCaseType.image => Icons.image_outlined,
-      VerificationCaseType.video => Icons.videocam_outlined,
-      VerificationCaseType.audio => Icons.graphic_eq_rounded,
-      VerificationCaseType.claim => Icons.chat_bubble_outline_rounded,
-      VerificationCaseType.citation => Icons.menu_book_outlined,
-      VerificationCaseType.scam => Icons.gpp_maybe_outlined,
-    };
+  VerificationCaseType.image => Icons.image_outlined,
+  VerificationCaseType.video => Icons.videocam_outlined,
+  VerificationCaseType.audio => Icons.graphic_eq_rounded,
+  VerificationCaseType.claim => Icons.chat_bubble_outline_rounded,
+  VerificationCaseType.citation => Icons.menu_book_outlined,
+  VerificationCaseType.scam => Icons.gpp_maybe_outlined,
+};

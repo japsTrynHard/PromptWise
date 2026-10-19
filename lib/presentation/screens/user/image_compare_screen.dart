@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import '../../../data/models/image_comparison.dart';
 import '../../controllers/adaptive_learning_controller.dart';
 import '../../controllers/image_comparison_controller.dart';
+import '../../controllers/image_round_readiness.dart';
 import '../../controllers/learning_progression_controller.dart';
 import '../../controllers/progress_controller.dart';
 import '../../controllers/verification_controller.dart';
@@ -23,6 +24,9 @@ class ImageCompareScreen extends StatefulWidget {
 }
 
 class _ImageCompareScreenState extends State<ImageCompareScreen> {
+  final ImageRoundReadiness _imageReadiness = ImageRoundReadiness();
+  int _imageRetryEpoch = 0;
+  bool _retryingImages = false;
   int _index = 0;
 
   String? _choice;
@@ -85,8 +89,12 @@ class _ImageCompareScreenState extends State<ImageCompareScreen> {
   }
 
   void _resetActivity() {
+    final rounds = context.read<ImageComparisonController>().rounds;
     setState(() {
       _index = 0;
+      _imageReadiness.reset(rounds.isEmpty ? null : rounds.first.id);
+      _imageRetryEpoch++;
+      _retryingImages = false;
 
       _choice = null;
 
@@ -101,6 +109,52 @@ class _ImageCompareScreenState extends State<ImageCompareScreen> {
     });
   }
 
+  void _recordImageLoad(
+    String roundId,
+    int generation,
+    String side,
+    ImageLoadStatus status,
+  ) {
+    if (!mounted) return;
+    if (_imageReadiness.record(
+      roundId: roundId,
+      generation: generation,
+      side: side,
+      status: status,
+    )) {
+      setState(() {});
+    }
+  }
+
+  Future<void> _retryImages(ImageComparisonRound round) async {
+    if (_answered ||
+        _isSubmittingAnswer ||
+        _retryingImages ||
+        _imageReadiness.roundId != round.id) {
+      return;
+    }
+    setState(() => _retryingImages = true);
+    final generation = _imageReadiness.generation;
+    // Failed ImageProviders can remain in the global cache. Evict both URLs
+    // before mounting new image widgets so a retry actually fetches again.
+    try {
+      await Future.wait<bool>([
+        NetworkImage(round.imageA.imageUrl).evict(),
+        NetworkImage(round.imageB.imageUrl).evict(),
+      ]);
+    } catch (_) {
+      if (!mounted || generation != _imageReadiness.generation) return;
+      setState(() => _retryingImages = false);
+      return; // Keep the original broken-image error and Another set action.
+    }
+    if (!mounted || generation != _imageReadiness.generation) return;
+    setState(() {
+      _imageReadiness.reset(round.id);
+      _imageRetryEpoch++;
+      _retryingImages = false;
+    });
+  }
+
   void _warmImages(List<ImageComparisonRound> rounds, int fromIndex) {
     if (!mounted || rounds.isEmpty) {
       return;
@@ -111,14 +165,39 @@ class _ImageCompareScreenState extends State<ImageCompareScreen> {
     for (var i = fromIndex; i < end; i++) {
       final round = rounds[i];
 
-      unawaited(precacheImage(NetworkImage(round.imageA.imageUrl), context));
+      // The visible Image.errorBuilder reports failures with a retry message.
+      // Speculative preloading must not raise a second unhandled image error.
+      unawaited(
+        precacheImage(
+          NetworkImage(round.imageA.imageUrl),
+          context,
+          onError: (error, stackTrace) {},
+        ),
+      );
 
-      unawaited(precacheImage(NetworkImage(round.imageB.imageUrl), context));
+      unawaited(
+        precacheImage(
+          NetworkImage(round.imageB.imageUrl),
+          context,
+          onError: (error, stackTrace) {},
+        ),
+      );
     }
   }
 
   Future<void> _choose(ImageComparisonRound round, String side) async {
-    if (_answered || _isSubmittingAnswer) {
+    final controller = context.read<ImageComparisonController>();
+    final rounds = controller.rounds;
+    if (_answered ||
+        _isSubmittingAnswer ||
+        _completed ||
+        _retryingImages ||
+        controller.isLoading ||
+        !_imageReadiness.canSubmit ||
+        _imageReadiness.roundId != round.id ||
+        !['A', 'B'].contains(side) ||
+        _index >= rounds.length ||
+        rounds[_index].id != round.id) {
       return;
     }
 
@@ -129,7 +208,11 @@ class _ImageCompareScreenState extends State<ImageCompareScreen> {
 
     final result = await context
         .read<ImageComparisonController>()
-        .submitAttempt(roundId: round.id, selectedSide: side);
+        .submitAttempt(
+          roundId: round.id,
+          selectedSide: side,
+          readiness: _imageReadiness,
+        );
 
     if (!mounted) {
       return;
@@ -158,11 +241,15 @@ class _ImageCompareScreenState extends State<ImageCompareScreen> {
   }
 
   Future<void> _next(List<ImageComparisonRound> rounds) async {
+    if (!_answered || _isSubmittingAnswer || _completed) return;
     if (_index < rounds.length - 1) {
       final nextIndex = _index + 1;
 
       setState(() {
         _index = nextIndex;
+        _imageReadiness.reset(rounds[nextIndex].id);
+        _imageRetryEpoch++;
+        _retryingImages = false;
 
         _choice = null;
 
@@ -272,6 +359,16 @@ class _ImageCompareScreenState extends State<ImageCompareScreen> {
             )
           : _RoundView(
               round: rounds[_index.clamp(0, rounds.length - 1)],
+              imagesReady:
+                  _imageReadiness.canSubmit &&
+                  !_retryingImages &&
+                  !controller.isLoading,
+              imageLoadFailed: _imageReadiness.hasFailure && !_retryingImages,
+              imageGeneration: _imageReadiness.generation,
+              imageRetryEpoch: _imageRetryEpoch,
+              onImageLoad: _recordImageLoad,
+              onRetryImages: () => _retryImages(rounds[_index]),
+              onAnotherSet: _loadFresh,
 
               roundNumber: _index + 1,
 
@@ -299,6 +396,13 @@ class _ImageCompareScreenState extends State<ImageCompareScreen> {
 
 class _RoundView extends StatelessWidget {
   final ImageComparisonRound round;
+  final bool imagesReady;
+  final bool imageLoadFailed;
+  final int imageGeneration;
+  final int imageRetryEpoch;
+  final void Function(String, int, String, ImageLoadStatus) onImageLoad;
+  final VoidCallback onRetryImages;
+  final VoidCallback onAnotherSet;
 
   final int roundNumber;
   final int totalRounds;
@@ -317,6 +421,13 @@ class _RoundView extends StatelessWidget {
 
   const _RoundView({
     required this.round,
+    required this.imagesReady,
+    required this.imageLoadFailed,
+    required this.imageGeneration,
+    required this.imageRetryEpoch,
+    required this.onImageLoad,
+    required this.onRetryImages,
+    required this.onAnotherSet,
     required this.roundNumber,
     required this.totalRounds,
     required this.choice,
@@ -406,7 +517,11 @@ class _RoundView extends StatelessWidget {
                   builder: (context, constraints) {
                     final children = [
                       _ImageCard(
+                        key: ValueKey('${round.id}:$imageRetryEpoch:A'),
                         side: 'A',
+                        canChoose: imagesReady,
+                        onLoadState: (status) =>
+                            onImageLoad(round.id, imageGeneration, 'A', status),
 
                         source: round.imageA,
 
@@ -422,7 +537,11 @@ class _RoundView extends StatelessWidget {
                       ),
 
                       _ImageCard(
+                        key: ValueKey('${round.id}:$imageRetryEpoch:B'),
                         side: 'B',
+                        canChoose: imagesReady,
+                        onLoadState: (status) =>
+                            onImageLoad(round.id, imageGeneration, 'B', status),
 
                         source: round.imageB,
 
@@ -463,6 +582,24 @@ class _RoundView extends StatelessWidget {
                     );
                   },
                 ),
+
+                if (!answered && imageLoadFailed) ...[
+                  const SizedBox(height: AppSpacing.lg),
+                  StateMessage.error(
+                    title: 'An image could not load',
+                    message:
+                        'Both images must be visible before you can answer. No answer has been recorded.',
+                    actionLabel: 'Retry images',
+                    onAction: onRetryImages,
+                  ),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton(
+                      onPressed: onAnotherSet,
+                      child: const Text('Try another set'),
+                    ),
+                  ),
+                ],
 
                 if (isSubmittingAnswer) ...[
                   const SizedBox(height: AppSpacing.xl),
@@ -595,6 +732,8 @@ class _RoundView extends StatelessWidget {
 }
 
 class _ImageCard extends StatelessWidget {
+  final bool canChoose;
+  final ValueChanged<ImageLoadStatus> onLoadState;
   final String side;
 
   final ImageComparisonSource source;
@@ -608,6 +747,9 @@ class _ImageCard extends StatelessWidget {
   final VoidCallback onTap;
 
   const _ImageCard({
+    super.key,
+    required this.canChoose,
+    required this.onLoadState,
     required this.side,
     required this.source,
     required this.selected,
@@ -620,6 +762,9 @@ class _ImageCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    // Image.frameBuilder runs before loadingBuilder. Do not declare this image
+    // ready until a decoded frame exists AND the loading overlay is gone.
+    var decodedFrame = false;
 
     final correct = answered && correctSide == side;
 
@@ -646,7 +791,7 @@ class _ImageCard extends StatelessWidget {
         clipBehavior: Clip.antiAlias,
 
         child: InkWell(
-          onTap: answered || submitting ? null : onTap,
+          onTap: answered || submitting || !canChoose ? null : onTap,
 
           child: AnimatedContainer(
             duration: AppMotion.fast,
@@ -673,8 +818,20 @@ class _ImageCard extends StatelessWidget {
 
                     fit: BoxFit.cover,
 
+                    // A non-null frame proves an image was actually decoded,
+                    // unlike a completed network request with broken bytes.
+                    frameBuilder: (context, child, frame, wasSyncLoaded) {
+                      decodedFrame = frame != null;
+                      return child;
+                    },
+
                     loadingBuilder: (context, child, event) {
                       if (event == null) {
+                        if (decodedFrame) {
+                          WidgetsBinding.instance.addPostFrameCallback((_) {
+                            onLoadState(ImageLoadStatus.ready);
+                          });
+                        }
                         return child;
                       }
 
@@ -693,37 +850,36 @@ class _ImageCard extends StatelessWidget {
                       );
                     },
 
-                    errorBuilder: (context, error, stackTrace) => ColoredBox(
-                      color: theme.colorScheme.surfaceContainerHighest,
-
-                      child: Center(
-                        child: Padding(
-                          padding: const EdgeInsets.all(AppSpacing.xl),
-
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-
-                            children: [
-                              const Icon(Icons.broken_image_outlined, size: 40),
-
-                              const SizedBox(height: AppSpacing.sm),
-
-                              const Text('This online image could not load.'),
-
-                              const SizedBox(height: AppSpacing.xs),
-
-                              Text(
-                                'Try another set if this keeps happening.',
-
-                                style: theme.textTheme.bodySmall,
-
-                                textAlign: TextAlign.center,
-                              ),
-                            ],
+                    errorBuilder: (context, error, stackTrace) {
+                      WidgetsBinding.instance.addPostFrameCallback((_) {
+                        onLoadState(ImageLoadStatus.failed);
+                      });
+                      return ColoredBox(
+                        color: theme.colorScheme.surfaceContainerHighest,
+                        child: Center(
+                          child: Padding(
+                            padding: const EdgeInsets.all(AppSpacing.xl),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(
+                                  Icons.broken_image_outlined,
+                                  size: 40,
+                                ),
+                                const SizedBox(height: AppSpacing.sm),
+                                const Text('This online image could not load.'),
+                                const SizedBox(height: AppSpacing.xs),
+                                Text(
+                                  'Retry images or try another set.',
+                                  style: theme.textTheme.bodySmall,
+                                  textAlign: TextAlign.center,
+                                ),
+                              ],
+                            ),
                           ),
                         ),
-                      ),
-                    ),
+                      );
+                    },
                   ),
                 ),
 
@@ -744,7 +900,7 @@ class _ImageCard extends StatelessWidget {
 
                       if (!answered)
                         FilledButton.tonal(
-                          onPressed: submitting ? null : onTap,
+                          onPressed: submitting || !canChoose ? null : onTap,
 
                           child: submitting && selected
                               ? const SizedBox.square(

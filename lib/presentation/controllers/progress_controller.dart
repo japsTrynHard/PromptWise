@@ -263,10 +263,14 @@ class ProgressController extends ChangeNotifier {
   bool hasBadge(String badgeId) => _progress.badges.contains(badgeId);
   int bestScoreForQuiz(String quizId) => _progress.quizBestScores[quizId] ?? 0;
 
-  Future<void> completeLesson(String lessonId) async {
+  Future<bool> completeLesson(String lessonId) async {
     final normalizedId = lessonId.trim();
-    if (!_lessonIds.contains(normalizedId) || isLessonCompleted(normalizedId)) {
-      return;
+    if (!_lessonIds.contains(normalizedId)) return false;
+    if (isLessonCompleted(normalizedId)) {
+      if (_errorMessage != null || _syncState == ProgressSyncState.error) {
+        await _persistProgress();
+      }
+      return _errorMessage == null;
     }
 
     final completed = List<String>.from(_progress.completedLessonIds)
@@ -282,6 +286,7 @@ class ProgressController extends ChangeNotifier {
     _updateLevelInMemory();
     notifyListeners();
     await _persistProgress();
+    return _errorMessage == null;
   }
 
   Future<bool> recordQuizResult({
@@ -433,6 +438,7 @@ class ProgressController extends ChangeNotifier {
   Future<void> _persistProgress() async {
     final userId = _activeUserId;
     final prefix = userId == null ? '' : _prefixFor(userId);
+    _errorMessage = null;
     try {
       await _persistLocal(prefix: prefix);
       if (userId != null && _remoteRepository != null) {

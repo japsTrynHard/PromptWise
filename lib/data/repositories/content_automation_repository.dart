@@ -90,6 +90,10 @@ class ContentAutomationRepository {
     required int draftArchiveDays,
     required List<LearningTopic> focusTopics,
   }) async {
+    validateScheduledAutomationFocus(
+      enabled: enabled,
+      focusTopics: focusTopics,
+    );
     await _client
         .from('automation_settings')
         .update({
