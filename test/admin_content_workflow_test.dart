@@ -311,6 +311,22 @@ void main() {
   );
 
   test(
+    'provider failure mentioning Edge Function logs retains its real cause',
+    () async {
+      final repo = _AutomationRepository()
+        ..runError = StateError(
+          'Content generation failed; no lesson drafts were created. Provider HTTP 429. Check Edge Function logs.',
+        );
+      final automation = ContentAutomationController(repository: repo);
+      addTearDown(automation.dispose);
+      await automation.bindAdministrator(true, userId: 'admin');
+      expect(await automation.runNow([LearningTopic.context]), isFalse);
+      expect(automation.actionErrorMessage, contains('Provider HTTP 429'));
+      expect(automation.actionErrorMessage, isNot(contains('not deployed')));
+    },
+  );
+
+  test(
     'admin source controls, settings, generation, and review work',
     () async {
       final repo = _AutomationRepository();
@@ -323,6 +339,7 @@ void main() {
       expect(
         await automation.saveSettings(
           enabled: true,
+          manualCooldownMinutes: 0,
           maxArticlesPerRun: 2,
           maxDraftsPerDay: 3,
           monthlyDraftCap: 30,
@@ -334,6 +351,7 @@ void main() {
         isTrue,
       );
       expect(repo.savedTopics, [LearningTopic.context]);
+      expect(automation.settings.manualCooldownMinutes, 0);
       expect(automation.settings.focusTopics, [LearningTopic.context]);
       expect(await automation.runNow([LearningTopic.verification]), isTrue);
       expect(repo.requestedTopics, [LearningTopic.verification]);
@@ -492,6 +510,7 @@ class _AutomationRepository implements ContentAutomationRepository {
 
   @override
   Future<void> updateSettings({
+    int? manualCooldownMinutes,
     required bool enabled,
     required int maxArticlesPerRun,
     required int maxDraftsPerDay,

@@ -61,6 +61,7 @@ type Candidate = {
   publishedAt: string | null;
   relevanceScore: number;
   topicHint: string | null;
+  cachedText?: string;
 };
 
 type GeneratedQuestion = {
@@ -331,8 +332,8 @@ Deno.serve(async (req) => {
     if (mode === 'manual' && target !== 'verification' && settings.last_manual_run_at) {
       const last = new Date(settings.last_manual_run_at).getTime();
       const cooldownMs =
-        Math.max(1, Number(settings.manual_cooldown_minutes ?? 30)) * 60000;
-      const remainingMs = last + cooldownMs - Date.now();
+        Math.max(0, Number(settings.manual_cooldown_minutes ?? 30)) * 60000;
+      const remainingMs = cooldownMs === 0 ? 0 : last + cooldownMs - Date.now();
       if (remainingMs > 0) {
         const minutes = Math.max(1, Math.ceil(remainingMs / 60000));
         return jsonResponse(
@@ -627,39 +628,52 @@ Deno.serve(async (req) => {
         .order('trust_level', { ascending: false });
       if (sourceError) throw sourceError;
 
+      // Reserve time for generation and returning a useful response before Edge timeout.
+      const deadline = Date.now() + 100_000;
+      const discoveryDeadline = Date.now() + 24_000;
+      const failureSamples: string[] = [];
       const sources = (sourceRows ?? []) as SourceRow[];
       const candidates: Candidate[] = [];
       let sourcesChecked = 0;
       let sourceFailures = 0;
 
-      for (const source of sources) {
-        try {
-          const found = await discoverFromSource(source);
-          candidates.push(...found);
-          sourcesChecked += 1;
-          await service
-            .from('content_sources')
-            .update({
-              last_checked_at: new Date().toISOString(),
-              updated_at: new Date().toISOString(),
-            })
-            .eq('id', source.id);
-        } catch (error) {
-          sourceFailures += 1;
-          console.error(`Source check failed: ${source.name}`, error);
-          // One source must not abort the whole run.
-        }
+      for (let offset = 0; offset < sources.length && Date.now() < discoveryDeadline; offset += 3) {
+        await Promise.all(sources.slice(offset, offset + 3).map(async source => {
+          try {
+            const found = await discoverFromSource(source, Math.max(1, Math.min(8000, discoveryDeadline - Date.now())));
+            candidates.push(...found);
+            sourcesChecked += 1;
+            await service
+              .from('content_sources')
+              .update({
+                last_checked_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+              })
+              .eq('id', source.id);
+          } catch (error) {
+            sourceFailures += 1;
+            if (failureSamples.length < 3) failureSamples.push(`${source.name}: ${errorMessage(error).slice(0, 250)}`);
+            console.error(`Source check failed: ${source.name}`, error);
+            // One source must not abort the whole run.
+          }
+        }));
       }
 
       const missingTopics = focusTopics!.filter(topic => !candidates.some(candidate =>
         textSupportsFocus(`${candidate.title} ${candidate.summary}`, topic)));
+      const fallbackDeadline = Math.min(deadline - 40_000, Date.now() + 16_000);
       if (missingTopics.length > 0) {
         candidates.push(...await discoverFallback({
           sources, topics: missingTopics, supports: textSupportsFocus,
-          load: (url: string) => fetchText(url, 8000), clean: articleTextFromHtml,
+          load: (url: string) => {
+            const remaining = fallbackDeadline - Date.now();
+            if (remaining <= 0) throw new Error('Trusted-source discovery time budget reached. Retry the remaining topics.');
+            return fetchText(url, Math.min(8000, remaining));
+          }, clean: articleTextFromHtml,
           aiEligible: isAiAwarenessSource,
           onFailure: (source: SourceRow, error: unknown) => {
             sourceFailures += 1;
+            if (failureSamples.length < 3) failureSamples.push(`${source.name}: ${errorMessage(error).slice(0, 250)}`);
             console.warn('Trusted-page fallback failed', source.name, errorMessage(error));
           },
         }));
@@ -693,7 +707,7 @@ Deno.serve(async (req) => {
       };
       let candidateAttempts = 0;
       for (const { candidate, focusTopic } of focusedCandidates) {
-        if (groqModels.length === 0 || lessonRequestBudget.remaining <= 0 || candidateAttempts >= Math.min(30, Math.max(maxArticles * 3, focusTopics!.length)) || draftsCreated >= Math.min(draftBudget, maxArticles)) {
+        if (Date.now() >= deadline - 3000 || groqModels.length === 0 || lessonRequestBudget.remaining <= 0 || candidateAttempts >= Math.min(30, Math.max(maxArticles * 3, focusTopics!.length)) || draftsCreated >= Math.min(draftBudget, maxArticles)) {
           break;
         }
 
@@ -703,48 +717,49 @@ Deno.serve(async (req) => {
           `${normalizeUrl(candidate.url)}|${candidate.title.toLowerCase().trim()}`,
         );
 
-        const { data: existingArticle } = await service
-          .from('discovered_articles')
-          .select('id, status')
-          .or(`article_url.eq.${escapePostgrest(candidate.url)},fingerprint.eq.${fingerprint}`)
-          .maybeSingle();
-
-        let article: { id: string };
-        if (existingArticle) {
-          // Processed/ignored articles are intentionally deduplicated forever, but a
-          // failed article must be retryable after a model/configuration fix.
-          if (existingArticle.status !== 'failed') continue;
-          article = { id: String(existingArticle.id) };
-          await service
-            .from('discovered_articles')
-            .update({ status: 'new', processed_at: null })
-            .eq('id', article.id);
-        } else {
-          const { data: insertedArticle, error: articleError } = await service
-            .from('discovered_articles')
-            .insert({
-              source_id: candidate.sourceId,
-              article_url: candidate.url,
-              title: candidate.title,
-              summary: candidate.summary,
-              published_at: candidate.publishedAt,
-              fingerprint,
-              relevance_score: candidate.relevanceScore,
-              topic_hint: candidate.topicHint,
-              status: 'new',
-            })
-            .select('id')
-            .single();
-          if (articleError) {
-            if ((articleError as { code?: string }).code === '23505') continue;
-            throw articleError;
-          }
-          article = { id: String(insertedArticle.id) };
-          articlesDiscovered += 1;
-        }
-
+        let article: { id: string } | undefined;
         try {
-          const articleText = await fetchArticleText(candidate.url);
+          const { data: existingArticle, error: lookupError } = await service
+            .from('discovered_articles')
+            .select('id, status')
+            .or(`article_url.eq.${escapePostgrest(candidate.url)},fingerprint.eq.${fingerprint}`)
+            .maybeSingle();
+
+          if (lookupError) throw lookupError;
+          if (existingArticle) {
+            // Processed/ignored articles are intentionally deduplicated forever, but a
+            // failed article must be retryable after a model/configuration fix.
+            if (existingArticle.status !== 'failed') continue;
+            article = { id: String(existingArticle.id) };
+            await service
+              .from('discovered_articles')
+              .update({ status: 'new', processed_at: null })
+              .eq('id', article.id);
+          } else {
+            const { data: insertedArticle, error: articleError } = await service
+              .from('discovered_articles')
+              .insert({
+                source_id: candidate.sourceId,
+                article_url: candidate.url,
+                title: candidate.title,
+                summary: candidate.summary,
+                published_at: candidate.publishedAt,
+                fingerprint,
+                relevance_score: candidate.relevanceScore,
+                topic_hint: candidate.topicHint,
+                status: 'new',
+              })
+              .select('id')
+              .single();
+            if (articleError) {
+              if ((articleError as { code?: string }).code === '23505') continue;
+              throw articleError;
+            }
+            article = { id: String(insertedArticle.id) };
+            articlesDiscovered += 1;
+          }
+
+          const articleText = candidate.cachedText ?? articleTextFromHtml(await fetchText(candidate.url, Math.max(1, Math.min(8000, deadline - Date.now() - 3000))));
           if (articleText.length < 300) {
             await markArticle(service, article.id, 'ignored');
             continue;
@@ -764,6 +779,7 @@ Deno.serve(async (req) => {
             articleText,
             focusTopic,
             requestBudget: lessonRequestBudget,
+            deadline,
           });
           validateDraft(draft);
           enforceDraftFocus(draft, focusTopic);
@@ -828,8 +844,9 @@ Deno.serve(async (req) => {
           savedByTopic[focusTopic] = (savedByTopic[focusTopic] ?? 0) + 1;
         } catch (error) {
           processingFailures += 1;
+          if (failureSamples.length < 3) failureSamples.push(`${candidate.sourceName}: ${errorMessage(error).slice(0, 500)}`);
           console.error('Article processing failed', candidate.url, error);
-          await markArticle(service, article.id, 'failed');
+          if (article) await markArticle(service, article.id, 'failed');
         }
       }
 
@@ -839,7 +856,7 @@ Deno.serve(async (req) => {
       const partial = runStatus === 'completed_with_errors';
       const runFailed = runStatus === 'failed';
       const diagnostic = `${sourceFailures} source check failure${sourceFailures === 1 ? '' : 's'}; ` +
-        `${processingFailures} article processing failure${processingFailures === 1 ? '' : 's'}.`;
+        `${processingFailures} article processing failure${processingFailures === 1 ? '' : 's'}. ${failureSamples.join(' | ')}`;
 
       await completeRun(service, runId, {
         status: runStatus,
@@ -965,19 +982,20 @@ function timingSafeEqual(a: string, b: string): boolean {
   return result === 0;
 }
 
-async function discoverFromSource(source: SourceRow): Promise<Candidate[]> {
+async function discoverFromSource(source: SourceRow, timeoutMs = 15000): Promise<Candidate[]> {
   const keywords = stringArray(source.relevance_keywords);
   if (source.source_type === 'rss' && source.feed_url) {
-    return discoverRss(source, keywords);
+    return discoverRss(source, keywords, timeoutMs);
   }
-  return discoverPage(source, keywords);
+  return discoverPage(source, keywords, timeoutMs);
 }
 
 async function discoverRss(
   source: SourceRow,
   keywords: string[],
+  timeoutMs = 15000,
 ): Promise<Candidate[]> {
-  const xml = await fetchText(source.feed_url ?? source.source_url);
+  const xml = await fetchText(source.feed_url ?? source.source_url, timeoutMs);
   const parser = new XMLParser({
     ignoreAttributes: false,
     attributeNamePrefix: '@_',
@@ -1024,8 +1042,9 @@ async function discoverRss(
 async function discoverPage(
   source: SourceRow,
   keywords: string[],
+  timeoutMs = 15000,
 ): Promise<Candidate[]> {
-  const html = await fetchText(source.source_url);
+  const html = await fetchText(source.source_url, timeoutMs);
   const anchorRegex = /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
   const candidates: Candidate[] = [];
   const seen = new Set<string>();
@@ -1689,6 +1708,7 @@ ${articleText.slice(0, MAX_ARTICLE_TEXT)}`;
 }
 
 async function generateDraft({
+  deadline,
   apiKey,
   models,
   candidate,
@@ -1702,6 +1722,7 @@ async function generateDraft({
   articleText: string;
   focusTopic: string;
   requestBudget: GroqRequestBudget;
+  deadline: number;
 }): Promise<GeneratedDraftPayload> {
   const basePrompt = `You are the curriculum drafting engine for PromptWise, an AI-literacy learning system.
 
@@ -1736,19 +1757,13 @@ Return STRICT JSON only with this exact shape:
   "topic_id": "${focusTopic}",
   "target_level": 3,
   "objectives": [
+    {"title":"...", "description":"..."},
+    {"title":"...", "description":"..."},
+    {"title":"...", "description":"..."},
     {"title":"...", "description":"..."}
   ],
-  "lesson_sections": ["Section heading\\nDetailed instructional content..."],
-  "questions": [
-    {
-      "question_type":"scenario",
-      "stem":"...",
-      "options":["...","...","...","..."],
-      "correct_index":0,
-      "explanation":"Explain why the keyed answer is best and what principle it demonstrates.",
-      "difficulty":3
-    }
-  ],
+  "lesson_sections": ["Section 1 heading\\nAt least 120 words of substantive instruction...","Section 2 heading\\nAt least 120 words of substantive instruction...","Section 3 heading\\nAt least 120 words of substantive instruction...","Section 4 heading\\nAt least 120 words of substantive instruction...","Section 5 heading\\nAt least 120 words of substantive instruction...","Section 6 heading\\nAt least 120 words of substantive instruction..."],
+  "questions": [{"question_type":"scenario","stem":"...","options":["Distinct option A","Distinct option B","Distinct option C","Distinct option D"],"correct_index":0,"explanation":"Explain why the keyed answer is best.","difficulty":3},{"question_type":"scenario","stem":"...","options":["Distinct option A","Distinct option B","Distinct option C","Distinct option D"],"correct_index":0,"explanation":"Explain why the keyed answer is best.","difficulty":3},{"question_type":"scenario","stem":"...","options":["Distinct option A","Distinct option B","Distinct option C","Distinct option D"],"correct_index":0,"explanation":"Explain why the keyed answer is best.","difficulty":3},{"question_type":"scenario","stem":"...","options":["Distinct option A","Distinct option B","Distinct option C","Distinct option D"],"correct_index":0,"explanation":"Explain why the keyed answer is best.","difficulty":3},{"question_type":"scenario","stem":"...","options":["Distinct option A","Distinct option B","Distinct option C","Distinct option D"],"correct_index":0,"explanation":"Explain why the keyed answer is best.","difficulty":3}],
   "verification_case": null
 }
 
@@ -1811,33 +1826,42 @@ ${articleText}`;
       : `${basePrompt}
 
 IMPORTANT VALIDATION NOTE:
-A previous generation attempt failed PromptWise validation. Make this response fully satisfy every exact count, section-depth, answer-choice, and difficulty requirement above.`;
+A previous generation attempt failed PromptWise validation: ${failures[failures.length - 1].slice(0, 500)}. Make this response fully satisfy every exact count, section-depth, answer-choice, and difficulty requirement above.`;
 
-    const response = await fetch(
-      'https://api.groq.com/openai/v1/chat/completions',
-      {
-        method: 'POST',
-        signal: AbortSignal.timeout(30_000),
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
+    const remainingMs = deadline - Date.now() - 2000;
+    if (remainingMs < 1000) throw new Error('Learning generation time budget reached. Retry remaining topics; saved drafts are preserved.');
+    let response: Response;
+    try {
+      response = await fetch(
+        'https://api.groq.com/openai/v1/chat/completions',
+        {
+          method: 'POST',
+          signal: AbortSignal.timeout(Math.min(25_000, remainingMs)),
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            model,
+            temperature: 0.2,
+            max_completion_tokens: 6000,
+            response_format: { type: 'json_object' },
+            messages: [
+              {
+                role: 'system',
+                content:
+                  'Produce rigorous, source-grounded AI-literacy curriculum drafts as valid JSON. Follow exact array counts and depth requirements. Never auto-publish or claim human review occurred.',
+              },
+              { role: 'user', content: prompt },
+            ],
+          }),
         },
-        body: JSON.stringify({
-          model,
-          temperature: 0.2,
-          response_format: { type: 'json_object' },
-          messages: [
-            {
-              role: 'system',
-              content:
-                'Produce rigorous, source-grounded AI-literacy curriculum drafts as valid JSON. Follow exact array counts and depth requirements. Never auto-publish or claim human review occurred.',
-            },
-            { role: 'user', content: prompt },
-          ],
-        }),
-      },
-    );
+      );
 
+    } catch (error) {
+      failures.push(`${model}: ${errorMessage(error)}`);
+      continue;
+    }
     if (!response.ok) {
       const detail = (await response.text()).slice(0, 800);
       disableUnavailableModel(models, model, response.status);
@@ -1859,6 +1883,7 @@ A previous generation attempt failed PromptWise validation. Make this response f
       const data = (await response.json()) as JsonRecord;
       const choices = asArray(data.choices);
       const first = asRecord(choices[0]);
+      if (first.finish_reason === 'length') throw new Error('AI output was truncated before the full lesson was complete.');
       const message = asRecord(first.message);
       const content = textValue(message.content).trim();
       if (!content) throw new Error('Groq returned an empty draft.');

@@ -3,6 +3,17 @@ import 'package:promptwise/data/models/content_automation.dart';
 import 'package:promptwise/data/models/learning_topic.dart';
 
 void main() {
+  test('zero cooldown stays disabled even with a future run timestamp', () {
+    final now = DateTime.utc(2026, 10, 20);
+    final settings = AutomationSettings.fromMap({
+      'manual_cooldown_minutes': 0,
+      'last_manual_run_at': now
+          .add(const Duration(minutes: 1))
+          .toIso8601String(),
+    });
+    expect(settings.manualCooldownMinutes, 0);
+    expect(settings.cooldownRemainingAt(now), 0);
+  });
   test(
     'learning cooldown applies globally and expires without changing topics',
     () {

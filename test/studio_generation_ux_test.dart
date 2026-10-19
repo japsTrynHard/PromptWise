@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -16,6 +17,7 @@ import 'package:promptwise/presentation/controllers/verification_controller.dart
 import 'package:promptwise/presentation/screens/admin/admin_learning_studio_screen.dart';
 import 'package:promptwise/presentation/screens/admin/admin_verification_studio_screen.dart';
 import 'package:promptwise/presentation/widgets/draft_queue_widgets.dart';
+import 'package:promptwise/presentation/widgets/studio_generation_widgets.dart';
 
 void main() {
   setUpAll(() async {
@@ -142,7 +144,7 @@ void main() {
           );
           final generate = find.widgetWithText(
             FilledButton,
-            verify ? 'Choose topics to generate' : 'Generate drafts',
+            'Choose topics to generate',
           );
           await tester.ensureVisible(generate);
           await tester.pumpAndSettle();
@@ -180,6 +182,90 @@ void main() {
       );
     }
   }
+
+  for (final verify in [false, true]) {
+    testWidgets('generation animation persists until completion in $verify', (
+      tester,
+    ) async {
+      _viewport(tester, 1280);
+      final pending = Completer<void>();
+      final automation = _Automation(pending: pending);
+      final studio = _Verification();
+      final awareness = _Awareness();
+      addTearDown(automation.dispose);
+      addTearDown(studio.dispose);
+      addTearDown(awareness.dispose);
+      await _mount(tester, automation, studio, awareness, verify: verify);
+      await tester.tap(
+        find.widgetWithText(FilledButton, 'Choose topics to generate'),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(verify ? 'Citation verification' : 'Context'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(FilledButton, 'Generate drafts'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(find.byType(StudioGenerationSpinner), findsOneWidget);
+      expect(find.byType(StudioGenerationProgress), findsOneWidget);
+      expect(
+        tester
+            .widget<FilledButton>(
+              find.widgetWithText(FilledButton, 'Generating...'),
+            )
+            .onPressed,
+        isNull,
+      );
+      await tester.pump(const Duration(milliseconds: 600));
+      expect(tester.binding.hasScheduledFrame, isTrue);
+      pending.complete();
+      await tester.pumpAndSettle();
+      expect(find.byType(StudioGenerationProgress), findsNothing);
+      expect(find.byType(StudioGenerationSpinner), findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  testWidgets('zero cooldown can be saved during an existing wait', (
+    tester,
+  ) async {
+    _viewport(tester, 1280);
+    final automation = _Automation(cooldown: true);
+    final studio = _Verification();
+    final awareness = _Awareness();
+    addTearDown(automation.dispose);
+    addTearDown(studio.dispose);
+    addTearDown(awareness.dispose);
+    await _mount(tester, automation, studio, awareness);
+    await tester.tap(find.text('Automation settings'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(CheckboxListTile, 'Context'));
+    final field = find.widgetWithText(
+      TextFormField,
+      'Manual generation cooldown',
+    );
+    await tester.ensureVisible(field);
+    await tester.pumpAndSettle();
+    for (final invalid in ['-1', '1441']) {
+      await tester.enterText(field, invalid);
+      await tester.tap(find.text('Save settings'));
+      await tester.pumpAndSettle();
+      expect(find.text('Enter a whole number from 0 to 1440.'), findsOneWidget);
+      expect(automation.savedCooldown, isNull);
+    }
+    await tester.enterText(field, '0');
+    await tester.tap(find.text('Save settings'));
+    await tester.pumpAndSettle();
+    expect(automation.savedCooldown, 0);
+    expect(
+      tester
+          .widget<FilledButton>(
+            find.widgetWithText(FilledButton, 'Choose topics to generate'),
+          )
+          .onPressed,
+      isNotNull,
+    );
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets(
     'cooldown is shown as generation status, not a data-load failure',
@@ -226,7 +312,9 @@ void main() {
       addTearDown(studio.dispose);
       addTearDown(awareness.dispose);
       await _mount(tester, automation, studio, awareness);
-      await tester.tap(find.widgetWithText(FilledButton, 'Generate drafts'));
+      await tester.tap(
+        find.widgetWithText(FilledButton, 'Choose topics to generate'),
+      );
       await tester.pumpAndSettle();
       await tester.tap(find.text('Select all'));
       await tester.pumpAndSettle();
@@ -337,11 +425,45 @@ Future<void> _preview(WidgetTester tester, String name) async {
 }
 
 class _Automation extends ContentAutomationController {
+  final Completer<void>? pending;
+  String? activeScope;
+  bool running = false;
+  int? savedCooldown;
+  @override
+  bool get isMutating => running;
+  Future<void> hold(String scope) async {
+    if (pending == null) return;
+    activeScope = scope;
+    running = true;
+    notifyListeners();
+    await pending!.future;
+    running = false;
+    notifyListeners();
+  }
+
+  @override
+  Future<bool> saveSettings({
+    int? manualCooldownMinutes,
+    required bool enabled,
+    required int maxArticlesPerRun,
+    required int maxDraftsPerDay,
+    required int monthlyDraftCap,
+    required int maxPendingDrafts,
+    required int maxPendingQuestions,
+    required int draftArchiveDays,
+    required List<LearningTopic> focusTopics,
+  }) async {
+    savedCooldown = manualCooldownMinutes;
+    notifyListeners();
+    return true;
+  }
+
   final bool partialVerifyWarning;
   final bool cooldown;
   final int draftCount;
   final int bankCount;
   _Automation({
+    this.pending,
     this.cooldown = false,
     this.draftCount = 0,
     this.bankCount = 0,
@@ -352,7 +474,8 @@ class _Automation extends ContentAutomationController {
       ? '4 drafts saved for review. Retry remaining topics later.'
       : null;
   @override
-  String? get generationScope => partialVerifyWarning ? 'verification' : null;
+  String? get generationScope =>
+      activeScope ?? (partialVerifyWarning ? 'verification' : null);
   @override
   List<QuestionBankReviewItem> get approvedQuestions => [
     for (var i = 0; i < bankCount; i++)
@@ -391,6 +514,7 @@ class _Automation extends ContentAutomationController {
   @override
   AutomationSettings get settings => AutomationSettings.fromMap({
     'enabled': true,
+    if (savedCooldown != null) 'manual_cooldown_minutes': savedCooldown,
     'focus_topics': <String>[],
     if (cooldown) 'last_manual_run_at': DateTime.now().toIso8601String(),
   });
@@ -401,6 +525,7 @@ class _Automation extends ContentAutomationController {
   @override
   Future<bool> runNow(List<LearningTopic> focusTopics) async {
     topics = focusTopics;
+    await hold('learning');
     return true;
   }
 
@@ -409,6 +534,7 @@ class _Automation extends ContentAutomationController {
     List<VerificationSubskill> focusSkills = const [],
   }) async {
     skills = focusSkills;
+    await hold('verification');
     return true;
   }
 }

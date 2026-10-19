@@ -37,6 +37,25 @@ void main() {
     headers: {'content-type': 'application/json'},
   );
 
+  test('Learning saves a zero cooldown without coercing it', () async {
+    final client = clientFor((request) async {
+      expect(request.method, 'PATCH');
+      expect(jsonDecode(request.body)['manual_cooldown_minutes'], 0);
+      return jsonResponse({'id': 1}, 200);
+    });
+    await ContentAutomationRepository(client).updateSettings(
+      manualCooldownMinutes: 0,
+      enabled: true,
+      maxArticlesPerRun: 2,
+      maxDraftsPerDay: 3,
+      monthlyDraftCap: 30,
+      maxPendingDrafts: 10,
+      maxPendingQuestions: 40,
+      draftArchiveDays: 15,
+      focusTopics: [LearningTopic.context],
+    );
+  });
+
   test(
     'approved bank reads approval metadata without requiring a new column on older servers',
     () async {

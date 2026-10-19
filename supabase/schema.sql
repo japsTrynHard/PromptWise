@@ -3321,7 +3321,7 @@ CREATE TABLE IF NOT EXISTS "public"."automation_settings" (
     CONSTRAINT "automation_settings_article_cleanup_days_check" CHECK ((("article_cleanup_days" >= 14) AND ("article_cleanup_days" <= 365))),
     CONSTRAINT "automation_settings_draft_archive_days_check" CHECK ((("draft_archive_days" >= 7) AND ("draft_archive_days" <= 180))),
     CONSTRAINT "automation_settings_id_check" CHECK (("id" = 1)),
-    CONSTRAINT "automation_settings_manual_cooldown_minutes_check" CHECK ((("manual_cooldown_minutes" >= 1) AND ("manual_cooldown_minutes" <= 1440))),
+    CONSTRAINT "automation_settings_manual_cooldown_minutes_check" CHECK ((("manual_cooldown_minutes" >= 0) AND ("manual_cooldown_minutes" <= 1440))),
     CONSTRAINT "automation_settings_max_articles_per_run_check" CHECK ((("max_articles_per_run" >= 1) AND ("max_articles_per_run" <= 10))),
     CONSTRAINT "automation_settings_max_drafts_per_day_check" CHECK ((("max_drafts_per_day" >= 1) AND ("max_drafts_per_day" <= 20))),
     CONSTRAINT "automation_settings_max_pending_drafts_check" CHECK ((("max_pending_drafts" >= 5) AND ("max_pending_drafts" <= 200))),

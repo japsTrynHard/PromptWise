@@ -199,6 +199,7 @@ class ContentAutomationController extends ChangeNotifier {
   }
 
   Future<bool> saveSettings({
+    int? manualCooldownMinutes,
     required bool enabled,
     required int maxArticlesPerRun,
     required int maxDraftsPerDay,
@@ -210,6 +211,8 @@ class ContentAutomationController extends ChangeNotifier {
   }) async {
     return _mutate((isCurrent) async {
       await _requireRepository().updateSettings(
+        manualCooldownMinutes:
+            manualCooldownMinutes ?? _settings.manualCooldownMinutes,
         enabled: enabled,
         maxArticlesPerRun: maxArticlesPerRun,
         maxDraftsPerDay: maxDraftsPerDay,
@@ -225,7 +228,8 @@ class ContentAutomationController extends ChangeNotifier {
         maxArticlesPerRun: maxArticlesPerRun,
         maxDraftsPerDay: maxDraftsPerDay,
         monthlyDraftCap: monthlyDraftCap,
-        manualCooldownMinutes: _settings.manualCooldownMinutes,
+        manualCooldownMinutes:
+            manualCooldownMinutes ?? _settings.manualCooldownMinutes,
         maxPendingDrafts: maxPendingDrafts,
         maxPendingQuestions: maxPendingQuestions,
         draftArchiveDays: draftArchiveDays,
@@ -382,6 +386,13 @@ class ContentAutomationController extends ChangeNotifier {
         value.contains('try again in about') ||
         value.contains('already started moments ago')) {
       return raw;
+    }
+    // A generation response mentioning Edge Function logs is still reachable.
+    if (value.contains('content generation failed') ||
+        value.contains('partial content run') ||
+        value.contains('groq draft generation') ||
+        value.contains('time budget reached')) {
+      return raw.length <= 1600 ? raw : '${raw.substring(0, 1600)}...';
     }
     if (value.contains('groq_api_key')) {
       return 'Content automation needs the GROQ_API_KEY Supabase secret before it can generate drafts.';

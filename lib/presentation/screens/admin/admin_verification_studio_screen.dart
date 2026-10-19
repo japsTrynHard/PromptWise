@@ -100,7 +100,6 @@ class _AdminVerificationStudioScreenState
                 preparing: _preparingGeneration,
                 onGenerate: () async {
                   if (_preparingGeneration) return;
-                  setState(() => _preparingGeneration = true);
                   try {
                     final chosen = await showDialog<List<VerificationSubskill>>(
                       context: context,
@@ -134,6 +133,7 @@ class _AdminVerificationStudioScreenState
                       ),
                     );
                     if (chosen == null || !context.mounted) return;
+                    setState(() => _preparingGeneration = true);
                     final messenger = ScaffoldMessenger.of(context);
                     final awareness = context.read<AwarenessFeedController>();
 
@@ -637,6 +637,8 @@ class _FreshDraftPanel extends StatelessWidget {
         limits.groqRequestsRemaining <= 0 ||
         queueFull ||
         onCooldown;
+    final generating =
+        automation.isMutating && automation.generationScope == 'verification';
     final busy =
         preparing ||
         automation.isMutating ||
@@ -777,14 +779,11 @@ class _FreshDraftPanel extends StatelessWidget {
                 onPressed: busy || !limits.enabled || budgetEmpty
                     ? null
                     : onGenerate,
-                icon: Icon(
-                  automation.isMutating
-                      ? Icons.hourglass_top_rounded
-                      : Icons.auto_awesome_outlined,
-                  size: 18,
-                ),
+                icon: generating || preparing
+                    ? const StudioGenerationSpinner()
+                    : const Icon(Icons.auto_awesome_outlined, size: 18),
                 label: Text(
-                  automation.isMutating
+                  generating
                       ? 'Generating...'
                       : preparing
                       ? 'Checking sources...'
@@ -800,6 +799,10 @@ class _FreshDraftPanel extends StatelessWidget {
               ),
             ],
           ),
+          if (generating || preparing) ...[
+            const SizedBox(height: AppSpacing.md),
+            StudioGenerationProgress(checkingSources: preparing && !generating),
+          ],
           const SizedBox(height: AppSpacing.md),
           ExpansionTile(
             tilePadding: EdgeInsets.zero,

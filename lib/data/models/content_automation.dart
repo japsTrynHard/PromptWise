@@ -66,7 +66,7 @@ class AutomationSettings {
   int get cooldownRemainingMinutes => cooldownRemainingAt(DateTime.now());
 
   int cooldownRemainingAt(DateTime now) {
-    if (lastManualRunAt == null) return 0;
+    if (manualCooldownMinutes <= 0 || lastManualRunAt == null) return 0;
     final remaining = lastManualRunAt!
         .add(Duration(minutes: manualCooldownMinutes))
         .difference(now);
@@ -120,7 +120,7 @@ class AutomationSettings {
         manualCooldownMinutes: _asInt(
           map['manual_cooldown_minutes'],
           fallback: 30,
-        ).clamp(1, 1440),
+        ).clamp(0, 1440),
         maxPendingDrafts: _asInt(
           map['max_pending_drafts'],
           fallback: 30,

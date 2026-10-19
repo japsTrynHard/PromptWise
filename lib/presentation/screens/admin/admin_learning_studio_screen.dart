@@ -380,6 +380,8 @@ class _AutomationCard extends StatelessWidget {
         queue.pendingDrafts >= queue.maxPendingDrafts ||
         queue.pendingQuestions >= queue.maxPendingQuestions;
     final busy = controller.isMutating || controller.isLoading;
+    final generating =
+        controller.isMutating && controller.generationScope == 'learning';
     return AppCard(
       padding: const EdgeInsets.all(AppSpacing.lg),
       child: Column(
@@ -516,18 +518,15 @@ class _AutomationCard extends StatelessWidget {
                     busy || !settings.enabled || cooldown > 0 || queueFull
                     ? null
                     : () => _openManualFocusDialog(context),
-                icon: Icon(
-                  controller.isMutating
-                      ? Icons.hourglass_top_rounded
-                      : Icons.auto_awesome_outlined,
-                  size: 18,
-                ),
+                icon: generating
+                    ? const StudioGenerationSpinner()
+                    : const Icon(Icons.auto_awesome_outlined, size: 18),
                 label: Text(
-                  controller.isMutating
+                  generating
                       ? 'Generating...'
                       : cooldown > 0
                       ? 'Ready in $cooldown min'
-                      : 'Generate drafts',
+                      : 'Choose topics to generate',
                 ),
               ),
               OutlinedButton.icon(
@@ -537,6 +536,10 @@ class _AutomationCard extends StatelessWidget {
               ),
             ],
           ),
+          if (generating) ...[
+            const SizedBox(height: AppSpacing.md),
+            const StudioGenerationProgress(),
+          ],
           const SizedBox(height: AppSpacing.md),
           ExpansionTile(
             tilePadding: EdgeInsets.zero,
@@ -595,6 +598,7 @@ class _AutomationCard extends StatelessWidget {
     );
     if (result == null || !context.mounted) return;
     await controller.saveSettings(
+      manualCooldownMinutes: result.manualCooldownMinutes,
       enabled: result.enabled,
       maxArticlesPerRun: result.maxArticlesPerRun,
       maxDraftsPerDay: result.maxDraftsPerDay,
@@ -608,6 +612,7 @@ class _AutomationCard extends StatelessWidget {
 }
 
 class _AutomationSettingsValue {
+  final int manualCooldownMinutes;
   final bool enabled;
   final int maxArticlesPerRun;
   final int maxDraftsPerDay;
@@ -618,6 +623,7 @@ class _AutomationSettingsValue {
   final List<LearningTopic> focusTopics;
 
   const _AutomationSettingsValue({
+    required this.manualCooldownMinutes,
     required this.enabled,
     required this.maxArticlesPerRun,
     required this.maxDraftsPerDay,
@@ -645,6 +651,7 @@ class _AutomationSettingsDialogState extends State<_AutomationSettingsDialog> {
   late Set<LearningTopic> _focusTopics;
   bool _showFocusError = false;
   late final TextEditingController _articles;
+  late final TextEditingController _cooldown;
   late final TextEditingController _dailyDrafts;
   late final TextEditingController _monthlyDrafts;
   late final TextEditingController _pendingDrafts;
@@ -656,6 +663,9 @@ class _AutomationSettingsDialogState extends State<_AutomationSettingsDialog> {
     super.initState();
     _enabled = widget.settings.enabled;
     _focusTopics = widget.settings.focusTopics.toSet();
+    _cooldown = TextEditingController(
+      text: widget.settings.manualCooldownMinutes.toString(),
+    );
     _articles = TextEditingController(
       text: widget.settings.maxArticlesPerRun.toString(),
     );
@@ -678,6 +688,7 @@ class _AutomationSettingsDialogState extends State<_AutomationSettingsDialog> {
 
   @override
   void dispose() {
+    _cooldown.dispose();
     _articles.dispose();
     _dailyDrafts.dispose();
     _monthlyDrafts.dispose();
@@ -740,6 +751,17 @@ class _AutomationSettingsDialogState extends State<_AutomationSettingsDialog> {
                       color: Theme.of(context).colorScheme.error,
                     ),
                   ),
+                const SizedBox(height: AppSpacing.md),
+                TextFormField(
+                  controller: _cooldown,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    labelText: 'Manual generation cooldown',
+                    suffixText: 'minutes',
+                    helperText: '0 disables the wait for demos. Range: 0-1440.',
+                  ),
+                  validator: (value) => _validateInt(value, 0, 1440),
+                ),
                 const SizedBox(height: AppSpacing.md),
                 TextFormField(
                   controller: _articles,
@@ -840,6 +862,7 @@ class _AutomationSettingsDialogState extends State<_AutomationSettingsDialog> {
     Navigator.pop(
       context,
       _AutomationSettingsValue(
+        manualCooldownMinutes: int.parse(_cooldown.text.trim()),
         enabled: _enabled,
         maxArticlesPerRun: int.parse(_articles.text.trim()),
         maxDraftsPerDay: int.parse(_dailyDrafts.text.trim()),

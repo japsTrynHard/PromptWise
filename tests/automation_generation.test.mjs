@@ -56,7 +56,8 @@ function verification(skill) {
 function harness({ topics = FOCUS_TOPICS, verify = false, cap = 10, failTopic,
   missing = false, fallback = false, duplicate = false, invalid = false, saveFails = false,
   httpStatus, timeout = false, wrongBody = false, missingTopic, brokenFeed = false,
-  omitSelection = false, modelIds = ['fixture-model'], rateLimitedModels = [] } = {}) {
+  omitSelection = false, cooldownMinutes = 30, lastManualRunAt = null, firstModelTimeout = false, advanceAfterFirstDraft = false, articleSaveFails = false,
+  modelIds = ['fixture-model'], rateLimitedModels = [] } = {}) {
   const all = verify ? VERIFICATION_FOCUS_SKILLS : FOCUS_TOPICS;
   const signals = verify ? verifySignals : learningSignals;
   const rows = missing ? [] : topics.filter(topic => topic !== missingTopic).map(topic => {
@@ -67,7 +68,7 @@ function harness({ topics = FOCUS_TOPICS, verify = false, cap = 10, failTopic,
   });
   feedItems = fallback ? [] : rows.map(row => ({ title: row.title, description: row.summary, link: row.source_url }));
   const inserts = [], calls = [], updates = [], modelCalls = [];
-  const settings = { enabled: true, max_articles_per_run: cap, max_drafts_per_day: 50,
+  const settings = { manual_cooldown_minutes: cooldownMinutes, last_manual_run_at: lastManualRunAt, enabled: true, max_articles_per_run: cap, max_drafts_per_day: 50,
     monthly_draft_cap: 100, max_drafts_per_run: cap, monthly_groq_request_cap: 100, focus_topics: topics };
   class Query {
     constructor(table) { this.table = table; this.kind = 'read'; }
@@ -81,7 +82,7 @@ function harness({ topics = FOCUS_TOPICS, verify = false, cap = 10, failTopic,
       let result = { data: null, error: null, count: 0 };
       if (this.kind === 'insert') {
         const isDraft = ['generated_content_drafts','verification_case_drafts'].includes(this.table);
-        if (isDraft && saveFails) result.error = {message: 'Fixture persistence failure'};
+        if ((isDraft && saveFails) || (this.table === 'discovered_articles' && articleSaveFails)) result.error = {message: 'Fixture persistence failure'};
         else { inserts.push({table: this.table, value: this.value}); result.data = {id: `saved-${inserts.length}`}; }
       } else if (this.kind === 'update') updates.push({table: this.table, value: this.value});
       else if (!this.head) {
@@ -97,6 +98,7 @@ function harness({ topics = FOCUS_TOPICS, verify = false, cap = 10, failTopic,
   }
   service = { from: table => new Query(table), auth: { getUser: async () => ({data:{user:{id:'admin'}}}) },
     rpc: async name => ({data: name === 'claim_content_automation_run' ? 'fixture-run' : null, error:null}) };
+  let clockOffset = 0;
   globalThis.fetch = async (url, options) => {
     url = String(url);
     if (url.includes('/models')) return Response.json({data:modelIds.map(id=>({id}))});
@@ -104,11 +106,13 @@ function harness({ topics = FOCUS_TOPICS, verify = false, cap = 10, failTopic,
       const prompt = JSON.parse(options.body).messages[1].content;
       const model = JSON.parse(options.body).model;
       modelCalls.push(model);
+      if (firstModelTimeout && modelCalls.length === 1) throw Error('Fixture first-model timeout');
       if (rateLimitedModels.includes(model)) return new Response('Model rate limited', {status:429});
       const topic = prompt.match(/ADMIN-SELECTED (?:FOCUS AREA \(MANDATORY\)|SKILL \(MANDATORY\)):\s*(\w+)/)?.[1];
       calls.push(topic);
       if (timeout || topic === failTopic) throw Error('Fixture provider timeout');
       if (httpStatus) return new Response('Provider unavailable', {status:httpStatus});
+      if (advanceAfterFirstDraft && calls.length === 1) clockOffset = 110_000;
       const payload = invalid ? {title:'Invalid'} : verify ? verification(topic) : lesson(topic);
       return Response.json({choices:[{message:{content:JSON.stringify(payload)}}]});
     }
@@ -122,12 +126,16 @@ function harness({ topics = FOCUS_TOPICS, verify = false, cap = 10, failTopic,
       : `<article>${body('AI general market news')}</article>`);
   };
   return { inserts, calls, updates, modelCalls, async run() {
+    const realNow = Date.now;
+    Date.now = () => realNow() + clockOffset;
+    try {
     const response = await handler(new Request('https://fixture.invalid/function', { method:'POST',
       headers:{authorization:'Bearer fixture','content-type':'application/json'},
       body: JSON.stringify({mode:'manual', ...(verify ? {target:'verification',
         ...(!omitSelection ? {focus_skills:topics} : {})} : {focus_topics:topics})}) }));
     return { response, data: await response.json(), drafts: inserts.filter(item => item.table ===
       (verify ? 'verification_case_drafts' : 'generated_content_drafts')) };
+    } finally { Date.now = realNow; }
   } };
 }
 
@@ -247,4 +255,48 @@ test('fallback rejects unrelated pages, isolates provider failure and follows on
     }, onFailure: source=>failures.push(source.source_url) });
   assert.equal(found.length,1); assert.equal(found[0].url,'https://trusted.invalid/context');
   assert.ok(!urls.some(url=>url.includes('evil'))); assert.equal(failures.length,1);
+});
+
+for (const cooldownMinutes of [0, 2, 30]) {
+  test('Learning real handler honors saved cooldown ' + cooldownMinutes, async () => {
+    const h = harness({ topics: ['context'], cooldownMinutes, lastManualRunAt: new Date().toISOString() });
+    const first = await h.run();
+    if (cooldownMinutes === 0) {
+      assert.equal(first.response.status, 200);
+      assert.equal(first.drafts.length, 1);
+      const second = await h.run();
+      assert.equal(second.response.status, 200);
+      assert.equal(h.calls.length, 2);
+    } else {
+      assert.equal(first.response.status, 429);
+      assert.match(first.data.error, /cooldown/);
+      assert.equal(h.calls.length, 0);
+    }
+  });
+}
+test('Learning retries another text model after a transport timeout', async () => {
+  const h = harness({topics:['context'], firstModelTimeout:true, modelIds:['fixture-model','llama-3.3-70b-versatile']});
+  const {data,drafts} = await h.run();
+  assert.equal(drafts.length, 1, JSON.stringify(data));
+  assert.equal(h.modelCalls.length, 2);
+});
+test('Learning failure response includes the actual provider cause', async () => {
+  const {data} = await harness({topics:['context'], timeout:true}).run();
+  assert.match(data.error, /Fixture provider timeout/);
+});
+
+test('Learning time budget stops further requests and preserves a saved draft', async () => {
+  const h = harness({topics:['context','specificity'], advanceAfterFirstDraft:true});
+  const {data,drafts} = await h.run();
+  assert.equal(drafts.length,1);
+  assert.equal(h.calls.length,1);
+  assert.equal(data.partial,true);
+  assert.equal(data.topicResults.filter(t=>t.created===0).length,1);
+});
+test('Learning article persistence errors produce a diagnostic response', async () => {
+  const h = harness({topics:['context'], articleSaveFails:true});
+  const {data,drafts} = await h.run();
+  assert.equal(drafts.length,0);
+  assert.match(data.error,/Fixture persistence failure/);
+  assert.equal(data.processingFailures,1);
 });

@@ -3,6 +3,61 @@ import 'package:flutter/material.dart';
 import '../../core/utils/constants.dart';
 import 'app_card.dart';
 
+/// Indeterminate activity only: the server does not report percentage progress.
+class StudioGenerationProgress extends StatelessWidget {
+  final bool checkingSources;
+
+  const StudioGenerationProgress({super.key, this.checkingSources = false});
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Semantics(
+      liveRegion: true,
+      child: Container(
+        padding: const EdgeInsets.all(AppSpacing.md),
+        decoration: BoxDecoration(
+          color: colors.primaryContainer.withValues(alpha: 0.35),
+          borderRadius: BorderRadius.circular(AppRadius.md),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              checkingSources
+                  ? 'Checking trusted sources...'
+                  : 'Generating drafts...',
+              style: Theme.of(context).textTheme.titleSmall,
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              'Please keep this page open. Drafts will appear when the run finishes.',
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            const LinearProgressIndicator(
+              semanticsLabel: 'Generation in progress',
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class StudioGenerationSpinner extends StatelessWidget {
+  const StudioGenerationSpinner({super.key});
+
+  @override
+  Widget build(BuildContext context) => SizedBox.square(
+    dimension: 18,
+    child: CircularProgressIndicator(
+      strokeWidth: 2,
+      color: Theme.of(context).colorScheme.primary,
+      semanticsLabel: 'Generating drafts',
+    ),
+  );
+}
+
 class StudioFocusOption<T> {
   final T value;
   final String label;

@@ -86,6 +86,7 @@ class ContentAutomationRepository {
   }
 
   Future<void> updateSettings({
+    int? manualCooldownMinutes,
     required bool enabled,
     required int maxArticlesPerRun,
     required int maxDraftsPerDay,
@@ -95,6 +96,10 @@ class ContentAutomationRepository {
     required int draftArchiveDays,
     required List<LearningTopic> focusTopics,
   }) async {
+    if (manualCooldownMinutes != null &&
+        (manualCooldownMinutes < 0 || manualCooldownMinutes > 1440)) {
+      throw ArgumentError("Manual cooldown must be from 0 to 1440 minutes.");
+    }
     validateScheduledAutomationFocus(
       enabled: enabled,
       focusTopics: focusTopics,
@@ -103,6 +108,8 @@ class ContentAutomationRepository {
         .from('automation_settings')
         .update({
           'enabled': enabled,
+          if (manualCooldownMinutes != null)
+            'manual_cooldown_minutes': manualCooldownMinutes,
           'focus_topics': focusTopics.map((topic) => topic.id).toList(),
           'max_articles_per_run': maxArticlesPerRun,
           'max_drafts_per_day': maxDraftsPerDay,

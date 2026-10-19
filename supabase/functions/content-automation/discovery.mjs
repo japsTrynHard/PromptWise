@@ -14,7 +14,7 @@ export async function discoverFallback({ sources, topics, supports, load,
         const add = (url, label, text) => {
           if (text.length >= 300 && matches(text)) found.push({
             sourceId: source.id, sourceName: source.name, url, title: label,
-            summary: text, publishedAt: null, relevanceScore: 50, topicHint: null,
+            summary: text, cachedText: text, publishedAt: null, relevanceScore: 50, topicHint: null,
           });
         };
         add(source.source_url, title, body);
