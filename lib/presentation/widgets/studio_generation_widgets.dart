@@ -215,6 +215,7 @@ class StudioNotice extends StatelessWidget {
   final String title;
   final String message;
   final bool isError;
+  final bool isWarning;
   final VoidCallback? onDismiss;
 
   const StudioNotice({
@@ -222,6 +223,7 @@ class StudioNotice extends StatelessWidget {
     required this.title,
     required this.message,
     this.isError = false,
+    this.isWarning = false,
     this.onDismiss,
   });
 
@@ -237,7 +239,9 @@ class StudioNotice extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Icon(
-            isError ? Icons.info_outline_rounded : Icons.check_circle_outline,
+            (isError || isWarning)
+                ? Icons.info_outline_rounded
+                : Icons.check_circle_outline,
             color: isError ? colors.error : colors.primary,
           ),
           const SizedBox(width: AppSpacing.sm),

@@ -4,6 +4,10 @@ import '../models/content_automation.dart';
 import '../models/learning_topic.dart';
 import '../models/verification.dart';
 
+class PartialGenerationException extends StateError {
+  PartialGenerationException(super.message);
+}
+
 class ContentAutomationRepository {
   final SupabaseClient _client;
 
@@ -169,10 +173,19 @@ class ContentAutomationRepository {
       if (response.status < 200 || response.status >= 300 || data is! Map) {
         throw StateError(_responseMessage(data, failureMessage));
       }
-      // Partial runs can save drafts, but must not be shown as full success.
-      if (data['partial'] == true ||
-          data['success'] == false ||
-          data['error'] != null) {
+      // Partial runs saved real drafts; retain an explicit warning outcome.
+      if (data['partial'] == true) {
+        var message = _responseMessage(data, failureMessage);
+        final saved = body['target'] == 'verification'
+            ? data['verificationDraftsCreated']
+            : data['draftsCreated'];
+        if (message.contains('429') && saved is num && saved > 0) {
+          message =
+              '$saved drafts saved for review. The AI provider rate-limited the remaining requests. Review the saved drafts and retry remaining topics later.';
+        }
+        throw PartialGenerationException(message);
+      }
+      if (data['success'] == false || data['error'] != null) {
         throw StateError(_responseMessage(data, failureMessage));
       }
       return data['message']?.toString() ?? 'Automation completed.';

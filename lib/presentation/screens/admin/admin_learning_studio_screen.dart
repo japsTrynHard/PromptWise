@@ -473,7 +473,18 @@ class _AutomationCard extends StatelessWidget {
               ),
             ],
           ),
-          if (controller.actionErrorMessage != null) ...[
+          if (controller.warningMessage != null &&
+              controller.generationScope != 'verification') ...[
+            const SizedBox(height: AppSpacing.md),
+            StudioNotice(
+              title: 'Drafts saved; some requests need retry',
+              message: controller.warningMessage!,
+              isWarning: true,
+              onDismiss: controller.clearMessages,
+            ),
+          ],
+          if (controller.actionErrorMessage != null &&
+              controller.generationScope != 'verification') ...[
             const SizedBox(height: AppSpacing.md),
             StudioNotice(
               title: 'Generation could not complete',

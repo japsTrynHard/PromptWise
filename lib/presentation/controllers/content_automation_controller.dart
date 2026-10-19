@@ -21,6 +21,10 @@ class ContentAutomationController extends ChangeNotifier {
   String? _errorMessage;
   String? _loadErrorMessage;
   String? _successMessage;
+  String? _warningMessage;
+  String? _generationScope;
+  String? get warningMessage => _warningMessage;
+  String? get generationScope => _generationScope;
   List<ContentSource> _sources = const [];
   List<GeneratedContentDraft> _drafts = const [];
   List<LearningContentHealth> _health = const [];
@@ -71,6 +75,7 @@ class ContentAutomationController extends ChangeNotifier {
     _errorMessage = null;
     _loadErrorMessage = null;
     _successMessage = null;
+    _warningMessage = null;
     _hasLoaded = false;
     _isLoading = false;
     _isMutating = false;
@@ -257,7 +262,7 @@ class ContentAutomationController extends ChangeNotifier {
         // A failed/partial run may still have saved drafts and used a cooldown.
         if (isCurrent()) await refresh();
       }
-    });
+    }, scope: 'learning');
   }
 
   Future<bool> runVerificationDraftsNow({
@@ -272,7 +277,7 @@ class ContentAutomationController extends ChangeNotifier {
       // Verification Studio owns the Verify draft/case data and refreshes only
       // those sections after generation. Do not reload all seven Learning
       // Studio datasets for an unrelated Verify-only operation.
-    });
+    }, scope: 'verification');
   }
 
   Future<bool> publishDraft(String draftId) async {
@@ -314,20 +319,28 @@ class ContentAutomationController extends ChangeNotifier {
   }
 
   void clearMessages() {
-    if (_errorMessage == null && _successMessage == null) return;
+    if (_errorMessage == null &&
+        _successMessage == null &&
+        _warningMessage == null) {
+      return;
+    }
     _errorMessage = null;
     _successMessage = null;
+    _warningMessage = null;
     notifyListeners();
   }
 
   Future<bool> _mutate(
-    Future<void> Function(bool Function() isCurrent) operation,
-  ) async {
+    Future<void> Function(bool Function() isCurrent) operation, {
+    String? scope,
+  }) async {
     if (_isMutating || !_isAdministrator || _repository == null) return false;
     final epoch = _adminEpoch;
+    _generationScope = scope;
     _isMutating = true;
     _errorMessage = null;
     _successMessage = null;
+    _warningMessage = null;
     notifyListeners();
     try {
       await operation(() => _isCurrentAdmin(epoch));
@@ -338,7 +351,11 @@ class ContentAutomationController extends ChangeNotifier {
         debugPrint('Learning Studio mutation failed: $error\n$stackTrace');
       }
       if (_isCurrentAdmin(epoch)) {
-        _errorMessage = _friendlyMessage(error);
+        if (error is PartialGenerationException) {
+          _warningMessage = error.message.toString();
+        } else {
+          _errorMessage = _friendlyMessage(error);
+        }
       }
       return false;
     } finally {

@@ -8,6 +8,7 @@ import {
 } from './focus.mjs';
 import { planCandidates, topicResults, topicSummary } from './planning.mjs';
 import { discoverFallback } from './discovery.mjs';
+import { isTextGenerationModel, orderTextModels, disableUnavailableModel } from './models.mjs';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -692,7 +693,7 @@ Deno.serve(async (req) => {
       };
       let candidateAttempts = 0;
       for (const { candidate, focusTopic } of focusedCandidates) {
-        if (lessonRequestBudget.remaining <= 0 || candidateAttempts >= Math.min(30, Math.max(maxArticles * 3, focusTopics!.length)) || draftsCreated >= Math.min(draftBudget, maxArticles)) {
+        if (groqModels.length === 0 || lessonRequestBudget.remaining <= 0 || candidateAttempts >= Math.min(30, Math.max(maxArticles * 3, focusTopics!.length)) || draftsCreated >= Math.min(draftBudget, maxArticles)) {
           break;
         }
 
@@ -1173,9 +1174,9 @@ async function resolveGroqModels(apiKey: string): Promise<string[]> {
     ids = (data.data ?? [])
       .map((item) => item.id?.trim() ?? '')
       .filter(Boolean)
-      .filter((id) => !/whisper|tts|speech|guard|safeguard|vision|image/i.test(id));
+      .filter(isTextGenerationModel);
   } catch (error) {
-    if (!configured) throw error;
+    if (!isTextGenerationModel(configured)) throw error;
     console.warn(
       'Could not refresh the Groq model list; trying configured model only:',
       errorMessage(error),
@@ -1183,26 +1184,7 @@ async function resolveGroqModels(apiKey: string): Promise<string[]> {
     return [configured];
   }
 
-  const preferredOrder = [
-    'llama-3.1-8b-instant',
-    'openai/gpt-oss-20b',
-    'openai/gpt-oss-120b',
-    'llama-3.3-70b-versatile',
-    'qwen/qwen3.6-27b',
-    'groq/compound-mini',
-    'groq/compound',
-  ];
-
-  const ordered: string[] = [];
-  if (configured) ordered.push(configured);
-  for (const preferred of preferredOrder) {
-    if (ids.includes(preferred) && !ordered.includes(preferred)) {
-      ordered.push(preferred);
-    }
-  }
-  for (const id of ids) {
-    if (!ordered.includes(id)) ordered.push(id);
-  }
+  const ordered = orderTextModels(ids, configured);
 
   if (ordered.length === 0) {
     throw new Error('No usable Groq text model is available to this project.');
@@ -1298,7 +1280,7 @@ async function generateVerificationDraftsFromAwareness({
   };
   let attempts = 0;
   for (const { candidate: raw, focusTopic } of plan) {
-    if (stats.created >= maxDrafts || groqBudget.remaining <= 0 ||
+    if (models.length === 0 || stats.created >= maxDrafts || groqBudget.remaining <= 0 ||
         attempts >= Math.min(30, Math.max(maxArticles, skills.length))) break;
     attempts += 1;
     attempted[focusTopic] = (attempted[focusTopic] ?? 0) + 1;
@@ -1672,6 +1654,7 @@ ${articleText.slice(0, MAX_ARTICLE_TEXT)}`;
           .update({ error_code: `http_${response.status}` })
           .eq('id', usageId);
       }
+      disableUnavailableModel(models, model, response.status);
       failures.push(`${model}: HTTP ${response.status}`);
       if (response.status === 401) break;
       continue;
@@ -1857,6 +1840,7 @@ A previous generation attempt failed PromptWise validation. Make this response f
 
     if (!response.ok) {
       const detail = (await response.text()).slice(0, 800);
+      disableUnavailableModel(models, model, response.status);
       failures.push(`${model} -> HTTP ${response.status}: ${detail}`);
       console.warn(`Groq model failed: ${model}`, detail);
 

@@ -56,7 +56,7 @@ function verification(skill) {
 function harness({ topics = FOCUS_TOPICS, verify = false, cap = 10, failTopic,
   missing = false, fallback = false, duplicate = false, invalid = false, saveFails = false,
   httpStatus, timeout = false, wrongBody = false, missingTopic, brokenFeed = false,
-  omitSelection = false } = {}) {
+  omitSelection = false, modelIds = ['fixture-model'], rateLimitedModels = [] } = {}) {
   const all = verify ? VERIFICATION_FOCUS_SKILLS : FOCUS_TOPICS;
   const signals = verify ? verifySignals : learningSignals;
   const rows = missing ? [] : topics.filter(topic => topic !== missingTopic).map(topic => {
@@ -66,7 +66,7 @@ function harness({ topics = FOCUS_TOPICS, verify = false, cap = 10, failTopic,
       content_excerpt: wrongBody ? '' : body(signals[i]), source_name: 'Fixture publisher', relevance_score: 80 };
   });
   feedItems = fallback ? [] : rows.map(row => ({ title: row.title, description: row.summary, link: row.source_url }));
-  const inserts = [], calls = [], updates = [];
+  const inserts = [], calls = [], updates = [], modelCalls = [];
   const settings = { enabled: true, max_articles_per_run: cap, max_drafts_per_day: 50,
     monthly_draft_cap: 100, max_drafts_per_run: cap, monthly_groq_request_cap: 100, focus_topics: topics };
   class Query {
@@ -99,9 +99,12 @@ function harness({ topics = FOCUS_TOPICS, verify = false, cap = 10, failTopic,
     rpc: async name => ({data: name === 'claim_content_automation_run' ? 'fixture-run' : null, error:null}) };
   globalThis.fetch = async (url, options) => {
     url = String(url);
-    if (url.includes('/models')) return Response.json({data:[{id:'fixture-model'}]});
+    if (url.includes('/models')) return Response.json({data:modelIds.map(id=>({id}))});
     if (url.includes('/chat/completions')) {
       const prompt = JSON.parse(options.body).messages[1].content;
+      const model = JSON.parse(options.body).model;
+      modelCalls.push(model);
+      if (rateLimitedModels.includes(model)) return new Response('Model rate limited', {status:429});
       const topic = prompt.match(/ADMIN-SELECTED (?:FOCUS AREA \(MANDATORY\)|SKILL \(MANDATORY\)):\s*(\w+)/)?.[1];
       calls.push(topic);
       if (timeout || topic === failTopic) throw Error('Fixture provider timeout');
@@ -118,7 +121,7 @@ function harness({ topics = FOCUS_TOPICS, verify = false, cap = 10, failTopic,
     return new Response(row && !wrongBody ? `<article>${row.summary}</article>`
       : `<article>${body('AI general market news')}</article>`);
   };
-  return { inserts, calls, updates, async run() {
+  return { inserts, calls, updates, modelCalls, async run() {
     const response = await handler(new Request('https://fixture.invalid/function', { method:'POST',
       headers:{authorization:'Bearer fixture','content-type':'application/json'},
       body: JSON.stringify({mode:'manual', ...(verify ? {target:'verification',
@@ -221,6 +224,15 @@ test('fair allocation rotates when capacity is smaller than the selection', () =
     planCandidates(candidates,FOCUS_TOPICS,textSupportsFocus,seed)[0].focusTopic)).size,5);
   assert.equal(textSupportsVerification('AI privacy rules','media_provenance'),false);
   assert.equal(topicResults(['context'],[],{},{} )[0].status,'no_matching_sources');
+});
+
+for (const verify of [false,true]) test(`${verify ? 'Verify' : 'Learning'} never retries the rate-limited model per article or uses Orpheus`,async()=>{
+  const h=harness({verify,topics:verify ? VERIFICATION_FOCUS_SKILLS.slice(0,2) : FOCUS_TOPICS.slice(0,2),
+    modelIds:['llama-3.1-8b-instant','llama-3.3-70b-versatile','canopylabs/orpheus-v1-english'],
+    rateLimitedModels:['llama-3.1-8b-instant']});
+  const {drafts}=await h.run();assert.equal(drafts.length,2);
+  assert.equal(h.modelCalls.filter(id=>id==='llama-3.1-8b-instant').length,1);
+  assert.ok(!h.modelCalls.some(id=>id.includes('orpheus')));
 });
 
 test('fallback rejects unrelated pages, isolates provider failure and follows only real same-host links', async () => {
