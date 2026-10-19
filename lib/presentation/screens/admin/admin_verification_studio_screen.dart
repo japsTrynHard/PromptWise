@@ -103,9 +103,9 @@ class _AdminVerificationStudioScreenState
                     final chosen = await showDialog<List<VerificationSubskill>>(
                       context: context,
                       builder: (_) => StudioFocusDialog<VerificationSubskill>(
-                        title: 'Create verification drafts',
+                        title: 'Choose verification topics',
                         description:
-                            'Choose skills for this run only. Generation stays within your selected skills and existing limits.',
+                            'Choose the topics you want to generate for this run. Only your selected topics will be requested; existing generation limits still apply.',
                         options: VerificationSubskill.values
                             .map(
                               (skill) => StudioFocusOption(
@@ -791,7 +791,7 @@ class _FreshDraftPanel extends StatelessWidget {
                       ? 'Checking sources...'
                       : onCooldown
                       ? 'Ready in $cooldown min'
-                      : 'Generate drafts',
+                      : 'Choose topics to generate',
                 ),
               ),
               OutlinedButton.icon(

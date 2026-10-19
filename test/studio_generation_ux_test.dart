@@ -44,11 +44,18 @@ void main() {
             tester,
             '${verify ? 'verify' : 'learning'}-${width.toInt()}',
           );
-          final generate = find.widgetWithText(FilledButton, 'Generate drafts');
+          final generate = find.widgetWithText(
+            FilledButton,
+            verify ? 'Choose topics to generate' : 'Generate drafts',
+          );
           await tester.ensureVisible(generate);
           await tester.pumpAndSettle();
           await tester.tap(generate);
           await tester.pumpAndSettle();
+          if (verify) {
+            expect(find.text('Choose verification topics'), findsOneWidget);
+            expect(automation.skills, isNull);
+          }
           final submit = find
               .widgetWithText(FilledButton, 'Generate drafts')
               .last;
