@@ -588,6 +588,7 @@ class VerificationCaseDraft {
 }
 
 class VerificationAutomationOverview {
+  final bool unlimitedGeneration;
   final bool enabled;
   final int maxArticlesPerRun;
   final int maxDraftsPerRun;
@@ -606,6 +607,7 @@ class VerificationAutomationOverview {
   final int remainingThisMonth;
 
   const VerificationAutomationOverview({
+    this.unlimitedGeneration = false,
     required this.enabled,
     required this.maxArticlesPerRun,
     required this.maxDraftsPerRun,
@@ -668,6 +670,7 @@ class VerificationAutomationOverview {
     ).clamp(0, 99999).toInt();
 
     return VerificationAutomationOverview(
+      unlimitedGeneration: settings['unlimited_generation'] == true,
       enabled: settings['enabled'] != false,
       maxArticlesPerRun: _asInt(
         settings['max_articles_per_run'],
@@ -687,7 +690,7 @@ class VerificationAutomationOverview {
       manualCooldownMinutes: _asInt(
         settings['manual_cooldown_minutes'],
         fallback: 15,
-      ).clamp(1, 120).toInt(),
+      ).clamp(0, 120).toInt(),
       pendingDrafts: _asInt(map['pending_drafts']).clamp(0, 99999).toInt(),
       draftsToday: draftsToday,
       draftsThisMonth: draftsThisMonth,

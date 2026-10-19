@@ -416,6 +416,10 @@ class VerificationStudioController extends ChangeNotifier {
   List<VerificationCase> get cases => List.unmodifiable(_cases);
   VerificationAutomationOverview get automationOverview => _automationOverview;
   int get generationCooldownMinutes {
+    if (_automationOverview.unlimitedGeneration ||
+        _automationOverview.manualCooldownMinutes == 0) {
+      return 0;
+    }
     final elapsed = _automationOverviewLoadedAt == null
         ? 0
         : DateTime.now().difference(_automationOverviewLoadedAt!).inMinutes;
@@ -520,6 +524,7 @@ class VerificationStudioController extends ChangeNotifier {
   }
 
   Future<bool> saveAutomationSettings({
+    bool unlimitedGeneration = false,
     required bool enabled,
     required int maxArticlesPerRun,
     required int maxDraftsPerRun,
@@ -533,6 +538,7 @@ class VerificationStudioController extends ChangeNotifier {
     refreshAfter: false,
     action: () async {
       await _requireRepository().updateAutomationSettings(
+        unlimitedGeneration: unlimitedGeneration,
         enabled: enabled,
         maxArticlesPerRun: maxArticlesPerRun,
         maxDraftsPerRun: maxDraftsPerRun,
@@ -542,32 +548,11 @@ class VerificationStudioController extends ChangeNotifier {
         maxPendingDrafts: maxPendingDrafts,
         manualCooldownMinutes: manualCooldownMinutes,
       );
-      final current = _automationOverview;
-      _automationOverview = VerificationAutomationOverview(
-        enabled: enabled,
-        maxArticlesPerRun: maxArticlesPerRun,
-        maxDraftsPerRun: maxDraftsPerRun,
-        maxDraftsPerDay: maxDraftsPerDay,
-        monthlyDraftCap: monthlyDraftCap,
-        monthlyGroqRequestCap: monthlyGroqRequestCap,
-        maxPendingDrafts: maxPendingDrafts,
-        manualCooldownMinutes: manualCooldownMinutes,
-        pendingDrafts: current.pendingDrafts,
-        draftsToday: current.draftsToday,
-        draftsThisMonth: current.draftsThisMonth,
-        groqRequestsThisMonth: current.groqRequestsThisMonth,
-        groqRequestsRemaining:
-            (monthlyGroqRequestCap - current.groqRequestsThisMonth)
-                .clamp(0, monthlyGroqRequestCap)
-                .toInt(),
-        cooldownRemainingMinutes: current.cooldownRemainingMinutes,
-        remainingToday: (maxDraftsPerDay - current.draftsToday)
-            .clamp(0, maxDraftsPerDay)
-            .toInt(),
-        remainingThisMonth: (monthlyDraftCap - current.draftsThisMonth)
-            .clamp(0, monthlyDraftCap)
-            .toInt(),
-      );
+      // Re-read server-calculated availability after switching modes or restoring
+      // defaults; an optimistic copy can keep an obsolete cooldown/usage count.
+      _automationOverview = await _requireRepository()
+          .fetchAutomationOverview();
+      _automationOverviewLoadedAt = DateTime.now();
     },
   );
 

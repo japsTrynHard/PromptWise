@@ -56,7 +56,7 @@ function verification(skill) {
 function harness({ topics = FOCUS_TOPICS, verify = false, cap = 10, failTopic,
   missing = false, fallback = false, duplicate = false, invalid = false, saveFails = false,
   httpStatus, timeout = false, wrongBody = false, missingTopic, brokenFeed = false,
-  omitSelection = false, cooldownMinutes = 30, lastManualRunAt = null, firstModelTimeout = false, advanceAfterFirstDraft = false, articleSaveFails = false,
+  omitSelection = false, cooldownMinutes = 30, lastManualRunAt = null, pageSource = false, shortSections = false, repairFails = false, repairWrongIndex = false, unlimited = false, usage = 0, recentSuccess = false, tokenCeiling = 4096, firstModelTimeout = false, advanceAfterFirstDraft = false, articleSaveFails = false,
   modelIds = ['fixture-model'], rateLimitedModels = [] } = {}) {
   const all = verify ? VERIFICATION_FOCUS_SKILLS : FOCUS_TOPICS;
   const signals = verify ? verifySignals : learningSignals;
@@ -68,7 +68,9 @@ function harness({ topics = FOCUS_TOPICS, verify = false, cap = 10, failTopic,
   });
   feedItems = fallback ? [] : rows.map(row => ({ title: row.title, description: row.summary, link: row.source_url }));
   const inserts = [], calls = [], updates = [], modelCalls = [];
-  const settings = { manual_cooldown_minutes: cooldownMinutes, last_manual_run_at: lastManualRunAt, enabled: true, max_articles_per_run: cap, max_drafts_per_day: 50,
+  const settings = { unlimited_generation: unlimited,
+    last_manual_success_at: recentSuccess ? new Date().toISOString() : null,
+    last_manual_attempt_at: recentSuccess ? new Date().toISOString() : null, manual_cooldown_minutes: cooldownMinutes, last_manual_run_at: lastManualRunAt, enabled: true, max_articles_per_run: cap, max_drafts_per_day: 50,
     monthly_draft_cap: 100, max_drafts_per_run: cap, monthly_groq_request_cap: 100, focus_topics: topics };
   class Query {
     constructor(table) { this.table = table; this.kind = 'read'; }
@@ -79,7 +81,7 @@ function harness({ topics = FOCUS_TOPICS, verify = false, cap = 10, failTopic,
     update(value) { this.kind = 'update'; this.value = value; return this; }
     single() { return this; } maybeSingle() { return this; }
     then(resolve, reject) {
-      let result = { data: null, error: null, count: 0 };
+      let result = { data: null, error: null, count: this.head && ['verification_case_drafts','verification_groq_requests'].includes(this.table) ? usage : 0 };
       if (this.kind === 'insert') {
         const isDraft = ['generated_content_drafts','verification_case_drafts'].includes(this.table);
         if ((isDraft && saveFails) || (this.table === 'discovered_articles' && articleSaveFails)) result.error = {message: 'Fixture persistence failure'};
@@ -88,7 +90,7 @@ function harness({ topics = FOCUS_TOPICS, verify = false, cap = 10, failTopic,
       else if (!this.head) {
         if (this.table === 'profiles') result.data = {role: 'administrator'};
         if (this.table.endsWith('settings')) result.data = settings;
-        if (this.table === 'content_sources') result.data = [trusted];
+        if (this.table === 'content_sources') result.data = [{...trusted,source_type:pageSource ? 'page' : 'rss'}];
         if (this.table === 'awareness_articles') result.data = fallback ? [] : rows;
         if (this.table === 'verification_case_drafts') result.data = duplicate ? [{id:'duplicate'}] : [];
         if (this.table === 'discovered_articles') result.data = duplicate ? {id:'duplicate',status:'processed'} : null;
@@ -103,7 +105,11 @@ function harness({ topics = FOCUS_TOPICS, verify = false, cap = 10, failTopic,
     url = String(url);
     if (url.includes('/models')) return Response.json({data:modelIds.map(id=>({id}))});
     if (url.includes('/chat/completions')) {
-      const prompt = JSON.parse(options.body).messages[1].content;
+      const requestBody = JSON.parse(options.body);
+      if (String(requestBody.model).startsWith('openai/gpt-oss-')) assert.equal(requestBody.reasoning_effort, 'low');
+      else assert.equal(requestBody.reasoning_effort, undefined);
+      if (requestBody.max_completion_tokens > tokenCeiling) return new Response('max_completion_tokens must be less than or equal to ' + tokenCeiling, {status:400});
+      const prompt = requestBody.messages[1].content;
       const model = JSON.parse(options.body).model;
       modelCalls.push(model);
       if (firstModelTimeout && modelCalls.length === 1) throw Error('Fixture first-model timeout');
@@ -113,14 +119,24 @@ function harness({ topics = FOCUS_TOPICS, verify = false, cap = 10, failTopic,
       if (timeout || topic === failTopic) throw Error('Fixture provider timeout');
       if (httpStatus) return new Response('Provider unavailable', {status:httpStatus});
       if (advanceAfterFirstDraft && calls.length === 1) clockOffset = 110_000;
-      const payload = invalid ? {title:'Invalid'} : verify ? verification(topic) : lesson(topic);
+      let payload = invalid ? {title:'Invalid'} : verify ? verification(topic) : lesson(topic);
+      if (!verify && shortSections && !invalid) {
+        if (prompt.includes('REPAIR SHORT LESSON SECTIONS')) {
+          const requested = JSON.parse(prompt.match(/SECTIONS TO EXPAND: (.*)\nTRUSTED/)[1]);
+          payload = {sections:requested.map(item=>({index:repairWrongIndex ? 99 : item.index,
+            section: repairFails ? 'Short heading\nToo short' : lesson(topic).lesson_sections[item.index]}))};
+        } else {
+          payload.lesson_sections[0] = 'Core concept\n' + Array(104).fill('instruction').join(' ');
+          payload.lesson_sections[1] = 'Applied example\n' + Array(113).fill('instruction').join(' ');
+        }
+      }
       return Response.json({choices:[{message:{content:JSON.stringify(payload)}}]});
     }
     if (url.endsWith('/feed')) {
       if (brokenFeed) throw Error('Fixture feed timeout');
       return new Response('<rss/>');
     }
-    if (fallback && url === trusted.source_url) return new Response(`<title>AI learning</title><main>${body(signals[all.indexOf(topics[0])])}</main>`);
+    if ((fallback || pageSource) && url === trusted.source_url) return new Response(`<title>AI learning</title><main>${body(signals[all.indexOf(topics[0])])}</main>`);
     const row = rows.find(row => row.source_url === url);
     return new Response(row && !wrongBody ? `<article>${row.summary}</article>`
       : `<article>${body('AI general market news')}</article>`);
@@ -299,4 +315,43 @@ test('Learning article persistence errors produce a diagnostic response', async 
   assert.equal(drafts.length,0);
   assert.match(data.error,/Fixture persistence failure/);
   assert.equal(data.processingFailures,1);
+});
+
+test('Learning repairs the screenshot depth failures (104/113 words) within a 4096-token model cap', async () => {
+  const h = harness({topics:['responsible_use'],shortSections:true,tokenCeiling:4096,modelIds:['llama-3.3-70b-versatile']});
+  const {data,drafts} = await h.run();
+  assert.equal(drafts.length,1,JSON.stringify(data));
+  assert.equal(data.groqRequestsUsed,2);
+  const sections=drafts[0].value.draft_payload.lesson_sections;
+  assert.ok(sections.every(s=>s.slice(s.indexOf('\n')+1).trim().split(/\s+/).length>=120));
+});
+for (const option of ['repairFails','repairWrongIndex']) test('Learning rejects invalid targeted repair: '+option, async()=>{
+  const {data,drafts} = await harness({topics:['context'],shortSections:true,[option]:true,modelIds:['fixture-model']}).run();
+  assert.equal(drafts.length,0); assert.equal(data.success,false);
+});
+test('Verify unlimited mode bypasses exhausted caps, queue and recent cooldown but keeps batch size', async()=>{
+  const h=harness({verify:true,topics:VERIFICATION_FOCUS_SKILLS,unlimited:true,usage:10000,recentSuccess:true,cap:2});
+  const {data,drafts}=await h.run();
+  assert.equal(drafts.length,2,JSON.stringify(data));assert.equal(data.partial,true);
+  assert.equal(h.calls.length,2);
+});
+test('Verify limited mode still blocks generation when the review queue is full', async()=>{
+  const h=harness({verify:true,topics:['claim_verification'],usage:10000});
+  const {data,drafts}=await h.run();
+  assert.equal(drafts.length,0); assert.equal(data.queuePaused,true);assert.equal(h.calls.length,0);
+});
+test('Verify zero cooldown permits a recent successful run when limits remain available', async()=>{
+  const {data,drafts}=await harness({verify:true,topics:['claim_verification'],recentSuccess:true,cooldownMinutes:0}).run();
+  assert.equal(drafts.length,1,JSON.stringify(data));
+});
+
+test('Learning uses the enabled guide page itself even when it has no article links', async()=>{
+  const {data,drafts}=await harness({topics:['specificity'],pageSource:true}).run();
+  assert.equal(drafts.length,1,JSON.stringify(data));
+  assert.equal(drafts[0].value.source_url,trusted.source_url);
+});
+test('GPT-OSS Learning requests and targeted repairs use the documented low reasoning setting', async()=>{
+  const {data,drafts}=await harness({topics:['responsible_use'],shortSections:true,modelIds:['openai/gpt-oss-20b']}).run();
+  assert.equal(drafts.length,1,JSON.stringify(data));
+  assert.equal(data.groqRequestsUsed,2);
 });

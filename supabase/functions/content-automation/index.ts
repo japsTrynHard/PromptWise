@@ -8,6 +8,7 @@ import {
 } from './focus.mjs';
 import { planCandidates, topicResults, topicSummary } from './planning.mjs';
 import { discoverFallback } from './discovery.mjs';
+import { shortLessonSections, applySectionRepairs } from './repair.mjs';
 import { isTextGenerationModel, orderTextModels, disableUnavailableModel } from './models.mjs';
 
 const corsHeaders = {
@@ -295,7 +296,8 @@ Deno.serve(async (req) => {
       Number(verificationSettings.max_pending_drafts ?? 40),
     );
 
-    const reviewQueueFull = queueIsFull({
+    const verificationUnlimited = verificationSettings.unlimited_generation === true;
+    const reviewQueueFull = !(target === 'verification' && verificationUnlimited) && queueIsFull({
       target,
       pendingDrafts,
       pendingQuestions,
@@ -345,7 +347,7 @@ Deno.serve(async (req) => {
       }
     }
 
-    if (mode === 'manual' && target === 'verification') {
+    if (mode === 'manual' && target === 'verification' && !verificationUnlimited && Number(verificationSettings.manual_cooldown_minutes ?? 10) > 0) {
       const lastAttempt = verificationSettings.last_manual_attempt_at
         ? new Date(verificationSettings.last_manual_attempt_at).getTime()
         : 0;
@@ -447,10 +449,10 @@ Deno.serve(async (req) => {
           1,
           Number(verificationSettings.monthly_groq_request_cap ?? 80),
         );
-        const dailyRemaining = Math.max(0, maxPerDay - todayCount);
-        const monthlyRemaining = Math.max(0, monthlyCap - monthCount);
-        const groqRequestRemaining = Math.max(0, monthlyGroqRequestCap - groqMonthCount);
-        const queueRemaining = Math.max(0, maxPendingVerificationDrafts - pendingVerificationDrafts);
+        const dailyRemaining = verificationUnlimited ? Infinity : Math.max(0, maxPerDay - todayCount);
+        const monthlyRemaining = verificationUnlimited ? Infinity : Math.max(0, monthlyCap - monthCount);
+        const groqRequestRemaining = verificationUnlimited ? Infinity : Math.max(0, monthlyGroqRequestCap - groqMonthCount);
+        const queueRemaining = verificationUnlimited ? Infinity : Math.max(0, maxPendingVerificationDrafts - pendingVerificationDrafts);
         const verificationBudget = Math.min(maxPerRun, dailyRemaining, monthlyRemaining, queueRemaining);
 
         if (verificationBudget <= 0 || groqRequestRemaining <= 0) {
@@ -1048,6 +1050,18 @@ async function discoverPage(
   const anchorRegex = /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
   const candidates: Candidate[] = [];
   const seen = new Set<string>();
+  // A configured page can be the teaching source itself, not only a link index.
+  const rootText = articleTextFromHtml(html);
+  const rootTitle = stripHtml(html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] ?? source.name);
+  const rootScore = relevanceFor(`${rootTitle} ${rootText}`, keywords);
+  if (rootText.length >= 300 && rootScore.score >= 1 && isAiAwarenessSource(rootText)) {
+    candidates.push({
+      sourceId: source.id, sourceName: source.name, url: source.source_url,
+      title: rootTitle.slice(0, 300), summary: rootText, cachedText: rootText,
+      publishedAt: null, relevanceScore: rootScore.score, topicHint: rootScore.topic,
+    });
+    seen.add(source.source_url);
+  }
   let match: RegExpExecArray | null;
   while ((match = anchorRegex.exec(html)) != null && candidates.length < 25) {
     const href = decodeHtml(match[1] ?? '').trim();
@@ -1746,7 +1760,7 @@ LEARNING DESIGN RULES:
 - Difficulty must match the reasoning complexity, not just vocabulary.
 - Never use trick wording.
 - Create exactly 4 meaningful learning objectives, exactly 6 lesson sections, and exactly 5 questions.
-- Every lesson section must begin with a short heading on the first line, followed by at least 120 words of substantive instruction.
+- Every lesson section must begin with a short heading on the first line, followed by 160-190 words of substantive instruction. The hard minimum is 120 words EXCLUDING the heading; count each section before responding and expand any short section with useful examples or guided practice.
 - The six sections should cover: core concept, second concept, applied example, common mistake/trade-off, guided analysis, and key takeaways/transfer.
 - Higher levels should require analysis, trade-offs, evidence quality, or multi-constraint reasoning.
 
@@ -1844,7 +1858,8 @@ A previous generation attempt failed PromptWise validation: ${failures[failures.
           body: JSON.stringify({
             model,
             temperature: 0.2,
-            max_completion_tokens: 6000,
+            max_completion_tokens: 4096,
+            ...(model.startsWith('openai/gpt-oss-') ? { reasoning_effort: 'low' } : {}),
             response_format: { type: 'json_object' },
             messages: [
               {
@@ -1888,7 +1903,45 @@ A previous generation attempt failed PromptWise validation: ${failures[failures.
       const content = textValue(message.content).trim();
       if (!content) throw new Error('Groq returned an empty draft.');
 
-      const draft = parseJsonObject(content) as unknown as GeneratedDraftPayload;
+      let draft = parseJsonObject(content) as unknown as GeneratedDraftPayload;
+      enforceDraftFocus(draft, focusTopic);
+      const shortSections = shortLessonSections(draft);
+      if (shortSections.length > 0 && requestBudget.remaining > 0) {
+        const repairTime = deadline - Date.now() - 2000;
+        if (repairTime < 1000) throw new Error('Learning section repair time budget reached.');
+        requestBudget.remaining -= 1;
+        requestBudget.used += 1;
+        const repairResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+          method: 'POST',
+          signal: AbortSignal.timeout(Math.min(25_000, repairTime)),
+          headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model, temperature: 0.2, max_completion_tokens: 4096,
+            ...(model.startsWith('openai/gpt-oss-') ? { reasoning_effort: 'low' } : {}),
+            response_format: { type: 'json_object' },
+            messages: [
+              { role: 'system', content: 'Expand short AI-literacy lesson sections with substantive teaching. Return strict JSON. Never add filler, repeated sentences, or invented source facts.' },
+              { role: 'user', content: `REPAIR SHORT LESSON SECTIONS
+ADMIN-SELECTED FOCUS AREA (MANDATORY): ${focusTopic}
+Return {"sections":[{"index":0,"section":"Heading\\nInstruction..."}]} with exactly the requested indices below.
+Each replacement must have a short heading, a newline, and 160-190 instructional words EXCLUDING the heading. The validator requires at least 120. Count the words. Add useful explanations, examples, trade-offs or guided practice. Preserve the lesson's skill and level ${draft.target_level}; do not invent facts.
+Only replace the short sections. Do not return questions or the rest of the lesson.
+SECTIONS TO EXPAND: ${JSON.stringify(shortSections)}
+TRUSTED SOURCE (${candidate.sourceName}, ${candidate.url}):
+${articleText}` },
+            ],
+          }),
+        });
+        if (!repairResponse.ok) {
+          disableUnavailableModel(models, model, repairResponse.status);
+          throw new Error(`Lesson section repair HTTP ${repairResponse.status}: ${(await repairResponse.text()).slice(0, 300)}`);
+        }
+        const repairData = asRecord(await repairResponse.json());
+        const repairChoice = asRecord(asArray(repairData.choices)[0]);
+        if (repairChoice.finish_reason === 'length') throw new Error('Lesson section repair output was truncated.');
+        draft = applySectionRepairs(draft, shortSections,
+          parseJsonObject(textValue(asRecord(repairChoice.message).content)));
+      }
       validateDraft(draft);
       enforceDraftFocus(draft, focusTopic);
       console.log(`Groq draft generation succeeded with model: ${model}`);

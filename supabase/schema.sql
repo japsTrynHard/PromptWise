@@ -1089,7 +1089,7 @@ begin
   from public.verification_groq_requests
   where requested_at >= date_trunc('month', now());
 
-  if v_settings.last_manual_success_at is not null then
+  if not v_settings.unlimited_generation and v_settings.manual_cooldown_minutes > 0 and v_settings.last_manual_success_at is not null then
     v_cooldown_remaining := greatest(
       0,
       ceil(
@@ -1108,10 +1108,10 @@ begin
     'drafts_today', v_today,
     'drafts_this_month', v_month,
     'groq_requests_this_month', v_groq_month,
-    'groq_requests_remaining', greatest(0, v_settings.monthly_groq_request_cap - v_groq_month),
+    'groq_requests_remaining', case when v_settings.unlimited_generation then null else greatest(0, v_settings.monthly_groq_request_cap - v_groq_month) end,
     'cooldown_remaining_minutes', v_cooldown_remaining,
-    'remaining_today', greatest(0, v_settings.max_drafts_per_day - v_today),
-    'remaining_this_month', greatest(0, v_settings.monthly_draft_cap - v_month)
+    'remaining_today', case when v_settings.unlimited_generation then null else greatest(0, v_settings.max_drafts_per_day - v_today) end,
+    'remaining_this_month', case when v_settings.unlimited_generation then null else greatest(0, v_settings.monthly_draft_cap - v_month) end
   );
 end;
 $$;
@@ -3182,7 +3182,7 @@ $$;
 ALTER FUNCTION "public"."update_my_profile"("p_full_name" "text") OWNER TO "postgres";
 
 
-CREATE OR REPLACE FUNCTION "public"."update_verification_automation_settings"("p_enabled" boolean, "p_max_articles_per_run" integer, "p_max_drafts_per_run" integer, "p_max_drafts_per_day" integer, "p_monthly_draft_cap" integer, "p_monthly_groq_request_cap" integer, "p_max_pending_drafts" integer, "p_manual_cooldown_minutes" integer) RETURNS "jsonb"
+CREATE OR REPLACE FUNCTION "public"."update_verification_automation_settings"("p_enabled" boolean, "p_max_articles_per_run" integer, "p_max_drafts_per_run" integer, "p_max_drafts_per_day" integer, "p_monthly_draft_cap" integer, "p_monthly_groq_request_cap" integer, "p_max_pending_drafts" integer, "p_manual_cooldown_minutes" integer, "p_unlimited_generation" boolean DEFAULT false) RETURNS "jsonb"
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'public', 'pg_temp'
     AS $$
@@ -3193,13 +3193,14 @@ begin
 
   update public.verification_automation_settings
   set enabled = p_enabled,
+      unlimited_generation = coalesce(p_unlimited_generation, false),
       max_articles_per_run = greatest(1, least(20, p_max_articles_per_run)),
       max_drafts_per_run = greatest(1, least(10, p_max_drafts_per_run)),
       max_drafts_per_day = greatest(1, least(50, p_max_drafts_per_day)),
       monthly_draft_cap = greatest(1, least(1000, p_monthly_draft_cap)),
       monthly_groq_request_cap = greatest(1, least(5000, p_monthly_groq_request_cap)),
       max_pending_drafts = greatest(5, least(200, p_max_pending_drafts)),
-      manual_cooldown_minutes = greatest(1, least(120, p_manual_cooldown_minutes)),
+      manual_cooldown_minutes = greatest(0, least(120, p_manual_cooldown_minutes)),
       updated_at = now()
   where id = 1;
 
@@ -3212,7 +3213,7 @@ end;
 $$;
 
 
-ALTER FUNCTION "public"."update_verification_automation_settings"("p_enabled" boolean, "p_max_articles_per_run" integer, "p_max_drafts_per_run" integer, "p_max_drafts_per_day" integer, "p_monthly_draft_cap" integer, "p_monthly_groq_request_cap" integer, "p_max_pending_drafts" integer, "p_manual_cooldown_minutes" integer) OWNER TO "postgres";
+ALTER FUNCTION "public"."update_verification_automation_settings"("p_enabled" boolean, "p_max_articles_per_run" integer, "p_max_drafts_per_run" integer, "p_max_drafts_per_day" integer, "p_monthly_draft_cap" integer, "p_monthly_groq_request_cap" integer, "p_max_pending_drafts" integer, "p_manual_cooldown_minutes" integer, "p_unlimited_generation" boolean) OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."update_verification_case_core"("p_case_id" "uuid", "p_title" "text", "p_scenario" "text", "p_claim_text" "text", "p_subskill" "text", "p_case_type" "text", "p_difficulty" integer, "p_correct_decision" "text", "p_expected_confidence" "text", "p_explanation" "text", "p_learning_point" "text") RETURNS "void"
@@ -3997,6 +3998,7 @@ ALTER TABLE "public"."topic_mastery" OWNER TO "postgres";
 CREATE TABLE IF NOT EXISTS "public"."verification_automation_settings" (
     "id" integer DEFAULT 1 NOT NULL,
     "enabled" boolean DEFAULT true NOT NULL,
+    "unlimited_generation" boolean DEFAULT false NOT NULL,
     "max_pending_drafts" integer DEFAULT 40 NOT NULL,
     "draft_archive_days" integer DEFAULT 30 NOT NULL,
     "rejected_delete_days" integer DEFAULT 7 NOT NULL,
@@ -4022,7 +4024,7 @@ CREATE TABLE IF NOT EXISTS "public"."verification_automation_settings" (
     CONSTRAINT "verification_automation_settings_drafts_day_check" CHECK ((("max_drafts_per_day" >= 1) AND ("max_drafts_per_day" <= 50))),
     CONSTRAINT "verification_automation_settings_drafts_run_check" CHECK ((("max_drafts_per_run" >= 1) AND ("max_drafts_per_run" <= 10))),
     CONSTRAINT "verification_automation_settings_groq_monthly_cap_check" CHECK ((("monthly_groq_request_cap" >= 1) AND ("monthly_groq_request_cap" <= 5000))),
-    CONSTRAINT "verification_automation_settings_manual_cooldown_check" CHECK ((("manual_cooldown_minutes" >= 1) AND ("manual_cooldown_minutes" <= 120))),
+    CONSTRAINT "verification_automation_settings_manual_cooldown_check" CHECK ((("manual_cooldown_minutes" >= 0) AND ("manual_cooldown_minutes" <= 120))),
     CONSTRAINT "verification_automation_settings_monthly_cap_check" CHECK ((("monthly_draft_cap" >= 1) AND ("monthly_draft_cap" <= 1000))),
     CONSTRAINT "verification_automation_settings_pending_check" CHECK ((("max_pending_drafts" >= 5) AND ("max_pending_drafts" <= 200))),
     CONSTRAINT "verification_automation_settings_published_check" CHECK ((("max_dynamic_published" >= 20) AND ("max_dynamic_published" <= 500))),
@@ -5516,9 +5518,9 @@ GRANT ALL ON FUNCTION "public"."update_my_profile"("p_full_name" "text") TO "ser
 
 
 
-REVOKE ALL ON FUNCTION "public"."update_verification_automation_settings"("p_enabled" boolean, "p_max_articles_per_run" integer, "p_max_drafts_per_run" integer, "p_max_drafts_per_day" integer, "p_monthly_draft_cap" integer, "p_monthly_groq_request_cap" integer, "p_max_pending_drafts" integer, "p_manual_cooldown_minutes" integer) FROM PUBLIC;
-GRANT ALL ON FUNCTION "public"."update_verification_automation_settings"("p_enabled" boolean, "p_max_articles_per_run" integer, "p_max_drafts_per_run" integer, "p_max_drafts_per_day" integer, "p_monthly_draft_cap" integer, "p_monthly_groq_request_cap" integer, "p_max_pending_drafts" integer, "p_manual_cooldown_minutes" integer) TO "authenticated";
-GRANT ALL ON FUNCTION "public"."update_verification_automation_settings"("p_enabled" boolean, "p_max_articles_per_run" integer, "p_max_drafts_per_run" integer, "p_max_drafts_per_day" integer, "p_monthly_draft_cap" integer, "p_monthly_groq_request_cap" integer, "p_max_pending_drafts" integer, "p_manual_cooldown_minutes" integer) TO "service_role";
+REVOKE ALL ON FUNCTION "public"."update_verification_automation_settings"("p_enabled" boolean, "p_max_articles_per_run" integer, "p_max_drafts_per_run" integer, "p_max_drafts_per_day" integer, "p_monthly_draft_cap" integer, "p_monthly_groq_request_cap" integer, "p_max_pending_drafts" integer, "p_manual_cooldown_minutes" integer, "p_unlimited_generation" boolean) FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."update_verification_automation_settings"("p_enabled" boolean, "p_max_articles_per_run" integer, "p_max_drafts_per_run" integer, "p_max_drafts_per_day" integer, "p_monthly_draft_cap" integer, "p_monthly_groq_request_cap" integer, "p_max_pending_drafts" integer, "p_manual_cooldown_minutes" integer, "p_unlimited_generation" boolean) TO "authenticated";
+GRANT ALL ON FUNCTION "public"."update_verification_automation_settings"("p_enabled" boolean, "p_max_articles_per_run" integer, "p_max_drafts_per_run" integer, "p_max_drafts_per_day" integer, "p_monthly_draft_cap" integer, "p_monthly_groq_request_cap" integer, "p_max_pending_drafts" integer, "p_manual_cooldown_minutes" integer, "p_unlimited_generation" boolean) TO "service_role";
 
 
 

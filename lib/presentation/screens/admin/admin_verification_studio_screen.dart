@@ -628,15 +628,20 @@ class _FreshDraftPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final limits = studio.automationOverview;
-    final queueFull = limits.pendingDrafts >= limits.maxPendingDrafts;
-    final cooldown = studio.generationCooldownMinutes;
+    final queueFull =
+        !limits.unlimitedGeneration &&
+        limits.pendingDrafts >= limits.maxPendingDrafts;
+    final cooldown = limits.unlimitedGeneration
+        ? 0
+        : studio.generationCooldownMinutes;
     final onCooldown = cooldown > 0;
     final budgetEmpty =
-        limits.remainingToday <= 0 ||
-        limits.remainingThisMonth <= 0 ||
-        limits.groqRequestsRemaining <= 0 ||
-        queueFull ||
-        onCooldown;
+        !limits.unlimitedGeneration &&
+        (limits.remainingToday <= 0 ||
+            limits.remainingThisMonth <= 0 ||
+            limits.groqRequestsRemaining <= 0 ||
+            queueFull ||
+            onCooldown);
     final generating =
         automation.isMutating && automation.generationScope == 'verification';
     final busy =
@@ -690,17 +695,23 @@ class _FreshDraftPanel extends StatelessWidget {
           StudioMetricRow(
             children: [
               StudioMetric(
-                value: '${limits.pendingDrafts}/${limits.maxPendingDrafts}',
+                value: limits.unlimitedGeneration
+                    ? '${limits.pendingDrafts}'
+                    : '${limits.pendingDrafts}/${limits.maxPendingDrafts}',
                 label: 'Drafts in review',
                 icon: Icons.description_outlined,
               ),
               StudioMetric(
-                value: '${limits.remainingToday}',
+                value: limits.unlimitedGeneration
+                    ? 'Unlimited'
+                    : '${limits.remainingToday}',
                 label: 'Drafts left today',
                 icon: Icons.today_outlined,
               ),
               StudioMetric(
-                value: '${limits.remainingThisMonth}',
+                value: limits.unlimitedGeneration
+                    ? 'Unlimited'
+                    : '${limits.remainingThisMonth}',
                 label: 'Drafts left this month',
                 icon: Icons.calendar_month_outlined,
               ),
@@ -811,7 +822,9 @@ class _FreshDraftPanel extends StatelessWidget {
               Padding(
                 padding: const EdgeInsets.only(bottom: 12),
                 child: Text(
-                  'Up to ${limits.maxArticlesPerRun} sources and ${limits.maxDraftsPerRun} drafts per run. Monthly AI requests: ${limits.groqRequestsThisMonth}/${limits.monthlyGroqRequestCap}. Topic choices apply to this run only.',
+                  limits.unlimitedGeneration
+                      ? 'Unlimited generation is enabled. Up to ${limits.maxArticlesPerRun} sources and ${limits.maxDraftsPerRun} drafts per batch. AI provider quotas still apply.'
+                      : 'Up to ${limits.maxArticlesPerRun} sources and ${limits.maxDraftsPerRun} drafts per run. Monthly AI requests: ${limits.groqRequestsThisMonth}/${limits.monthlyGroqRequestCap}. Topic choices apply to this run only.',
                 ),
               ),
             ],
@@ -830,6 +843,7 @@ class _FreshDraftPanel extends StatelessWidget {
     if (result == null || !context.mounted) return;
 
     await studio.saveAutomationSettings(
+      unlimitedGeneration: result.unlimitedGeneration,
       enabled: result.enabled,
       maxArticlesPerRun: result.maxArticlesPerRun,
       maxDraftsPerRun: result.maxDraftsPerRun,
@@ -843,6 +857,7 @@ class _FreshDraftPanel extends StatelessWidget {
 }
 
 class _VerifyAutomationSettingsValue {
+  final bool unlimitedGeneration;
   final bool enabled;
   final int maxArticlesPerRun;
   final int maxDraftsPerRun;
@@ -853,6 +868,7 @@ class _VerifyAutomationSettingsValue {
   final int manualCooldownMinutes;
 
   const _VerifyAutomationSettingsValue({
+    required this.unlimitedGeneration,
     required this.enabled,
     required this.maxArticlesPerRun,
     required this.maxDraftsPerRun,
@@ -878,6 +894,7 @@ class _VerifyAutomationSettingsDialogState
     extends State<_VerifyAutomationSettingsDialog> {
   final _formKey = GlobalKey<FormState>();
   late bool _enabled;
+  late bool _unlimited;
   late final TextEditingController _articles;
   late final TextEditingController _perRun;
   late final TextEditingController _daily;
@@ -891,6 +908,7 @@ class _VerifyAutomationSettingsDialogState
     super.initState();
     final settings = widget.settings;
     _enabled = settings.enabled;
+    _unlimited = settings.unlimitedGeneration;
     _articles = TextEditingController(text: '${settings.maxArticlesPerRun}');
     _perRun = TextEditingController(text: '${settings.maxDraftsPerRun}');
     _daily = TextEditingController(text: '${settings.maxDraftsPerDay}');
@@ -939,6 +957,16 @@ class _VerifyAutomationSettingsDialogState
                   ),
                 ),
                 const SizedBox(height: AppSpacing.md),
+                SwitchListTile.adaptive(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Unlimited generation'),
+                  subtitle: const Text(
+                    'No daily/monthly caps, review queue cap, or manual cooldown. Batch size and AI provider quotas still apply.',
+                  ),
+                  value: _unlimited,
+                  onChanged: (value) => setState(() => _unlimited = value),
+                ),
+                const SizedBox(height: AppSpacing.md),
                 _numberField(
                   controller: _articles,
                   label: 'Maximum Awareness articles checked per run',
@@ -957,6 +985,7 @@ class _VerifyAutomationSettingsDialogState
                 const SizedBox(height: AppSpacing.md),
                 _numberField(
                   controller: _daily,
+                  enabled: !_unlimited,
                   label: 'Maximum Verify drafts per day',
                   helper: 'Range: 1–50',
                   min: 1,
@@ -965,6 +994,7 @@ class _VerifyAutomationSettingsDialogState
                 const SizedBox(height: AppSpacing.md),
                 _numberField(
                   controller: _monthly,
+                  enabled: !_unlimited,
                   label: 'Monthly Verify draft cap',
                   helper:
                       'Maximum successfully created Verify drafts each month. Range: 1–1000',
@@ -974,6 +1004,7 @@ class _VerifyAutomationSettingsDialogState
                 const SizedBox(height: AppSpacing.md),
                 _numberField(
                   controller: _monthlyGroq,
+                  enabled: !_unlimited,
                   label: 'Monthly Groq generation request cap for Verify',
                   helper:
                       'Hard request guard, including failed/fallback model calls. Range: 1–5000',
@@ -983,6 +1014,7 @@ class _VerifyAutomationSettingsDialogState
                 const SizedBox(height: AppSpacing.md),
                 _numberField(
                   controller: _pending,
+                  enabled: !_unlimited,
                   label: 'Maximum pending Verify drafts',
                   helper:
                       'Generation pauses while the review queue is full. Range: 5–200',
@@ -992,10 +1024,11 @@ class _VerifyAutomationSettingsDialogState
                 const SizedBox(height: AppSpacing.md),
                 _numberField(
                   controller: _cooldown,
+                  enabled: !_unlimited,
                   label: 'Manual successful-run cooldown',
                   helper:
-                      'Minutes between successful manual runs. Range: 1–120',
-                  min: 1,
+                      'Minutes between successful manual runs. 0 disables the wait. Range: 0-120',
+                  min: 0,
                   max: 120,
                 ),
                 const SizedBox(height: AppSpacing.md),
@@ -1008,6 +1041,11 @@ class _VerifyAutomationSettingsDialogState
         ),
       ),
       actions: [
+        TextButton.icon(
+          onPressed: _restoreDefaults,
+          icon: const Icon(Icons.restart_alt),
+          label: const Text('Restore tipid defaults'),
+        ),
         TextButton(
           onPressed: () => Navigator.pop(context),
           child: const Text('Cancel'),
@@ -1023,12 +1061,15 @@ class _VerifyAutomationSettingsDialogState
     required String helper,
     required int min,
     required int max,
+    bool enabled = true,
   }) {
     return TextFormField(
       controller: controller,
+      enabled: enabled,
       keyboardType: TextInputType.number,
       decoration: InputDecoration(labelText: label, helperText: helper),
       validator: (value) {
+        if (!enabled) return null;
         final number = int.tryParse(value?.trim() ?? '');
         if (number == null || number < min || number > max) {
           return 'Enter a whole number from $min to $max.';
@@ -1040,19 +1081,53 @@ class _VerifyAutomationSettingsDialogState
 
   void _save() {
     if (!(_formKey.currentState?.validate() ?? false)) return;
+    final defaults = VerificationAutomationOverview.defaults();
+    int limit(
+      TextEditingController controller,
+      int fallback,
+      int min,
+      int max,
+    ) => (int.tryParse(controller.text.trim()) ?? fallback)
+        .clamp(min, max)
+        .toInt();
     Navigator.pop(
       context,
       _VerifyAutomationSettingsValue(
+        unlimitedGeneration: _unlimited,
         enabled: _enabled,
         maxArticlesPerRun: int.parse(_articles.text.trim()),
         maxDraftsPerRun: int.parse(_perRun.text.trim()),
-        maxDraftsPerDay: int.parse(_daily.text.trim()),
-        monthlyDraftCap: int.parse(_monthly.text.trim()),
-        monthlyGroqRequestCap: int.parse(_monthlyGroq.text.trim()),
-        maxPendingDrafts: int.parse(_pending.text.trim()),
-        manualCooldownMinutes: int.parse(_cooldown.text.trim()),
+        maxDraftsPerDay: limit(_daily, defaults.maxDraftsPerDay, 1, 50),
+        monthlyDraftCap: limit(_monthly, defaults.monthlyDraftCap, 1, 1000),
+        monthlyGroqRequestCap: limit(
+          _monthlyGroq,
+          defaults.monthlyGroqRequestCap,
+          1,
+          5000,
+        ),
+        maxPendingDrafts: limit(_pending, defaults.maxPendingDrafts, 5, 200),
+        manualCooldownMinutes: limit(
+          _cooldown,
+          defaults.manualCooldownMinutes,
+          0,
+          120,
+        ),
       ),
     );
+  }
+
+  void _restoreDefaults() {
+    final defaults = VerificationAutomationOverview.defaults();
+    setState(() {
+      _unlimited = false;
+      _articles.text = defaults.maxArticlesPerRun.toString();
+      _perRun.text = defaults.maxDraftsPerRun.toString();
+      _daily.text = defaults.maxDraftsPerDay.toString();
+      _monthly.text = defaults.monthlyDraftCap.toString();
+      _monthlyGroq.text = defaults.monthlyGroqRequestCap.toString();
+      _pending.text = defaults.maxPendingDrafts.toString();
+      _cooldown.text = defaults.manualCooldownMinutes.toString();
+    });
   }
 }
 

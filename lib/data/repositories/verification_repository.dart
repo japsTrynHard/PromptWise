@@ -126,6 +126,7 @@ class VerificationRepository {
   }
 
   Future<void> updateAutomationSettings({
+    bool unlimitedGeneration = false,
     required bool enabled,
     required int maxArticlesPerRun,
     required int maxDraftsPerRun,
@@ -139,6 +140,7 @@ class VerificationRepository {
       'update_verification_automation_settings',
       params: {
         'p_enabled': enabled,
+        'p_unlimited_generation': unlimitedGeneration,
         'p_max_articles_per_run': maxArticlesPerRun,
         'p_max_drafts_per_run': maxDraftsPerRun,
         'p_max_drafts_per_day': maxDraftsPerDay,

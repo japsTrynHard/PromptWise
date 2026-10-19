@@ -835,6 +835,11 @@ class _AutomationSettingsDialogState extends State<_AutomationSettingsDialog> {
         ),
       ),
       actions: [
+        TextButton.icon(
+          onPressed: _restoreDefaults,
+          icon: const Icon(Icons.restart_alt),
+          label: const Text('Restore tipid defaults'),
+        ),
         TextButton(
           onPressed: () => Navigator.pop(context),
           child: const Text('Cancel'),
@@ -842,6 +847,19 @@ class _AutomationSettingsDialogState extends State<_AutomationSettingsDialog> {
         FilledButton(onPressed: _save, child: const Text('Save settings')),
       ],
     );
+  }
+
+  void _restoreDefaults() {
+    final defaults = AutomationSettings.defaults();
+    setState(() {
+      _articles.text = defaults.maxArticlesPerRun.toString();
+      _dailyDrafts.text = defaults.maxDraftsPerDay.toString();
+      _monthlyDrafts.text = defaults.monthlyDraftCap.toString();
+      _pendingDrafts.text = defaults.maxPendingDrafts.toString();
+      _pendingQuestions.text = defaults.maxPendingQuestions.toString();
+      _archiveDays.text = defaults.draftArchiveDays.toString();
+      _cooldown.text = defaults.manualCooldownMinutes.toString();
+    });
   }
 
   String? _validateInt(String? raw, int min, int max) {

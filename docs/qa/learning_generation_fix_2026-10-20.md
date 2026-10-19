@@ -1,5 +1,9 @@
 # Learning generation and Studio loading feedback — 20 October 2026
 
+Follow-up: the user's subsequent screenshot confirmed section-depth and token-cap
+failures. See [the repair report](learning_generation_repair_2026-10-20.md) for the
+additional fixes, unlimited Verify settings and updated deployment requirements.
+
 Implemented locally; production generation has not been exercised. The user
 reported that Verify works and Learning failed with an Edge Function message.
 The original Learning error/log was unavailable, so its exact cause is unconfirmed.

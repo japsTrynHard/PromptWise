@@ -7,6 +7,8 @@ import 'package:promptwise/data/models/learning_topic.dart';
 import 'package:promptwise/data/models/verification.dart';
 import 'package:promptwise/data/repositories/content_automation_repository.dart';
 import 'package:promptwise/data/repositories/content_repository.dart';
+import 'package:promptwise/data/repositories/verification_repository.dart';
+import 'package:promptwise/presentation/controllers/verification_controller.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 void main() {
@@ -55,6 +57,106 @@ void main() {
       focusTopics: [LearningTopic.context],
     );
   });
+
+  test(
+    'Verify sends unlimited policy and zero cooldown to the settings RPC',
+    () async {
+      final client = clientFor((request) async {
+        expect(
+          request.url.path,
+          endsWith('/rpc/update_verification_automation_settings'),
+        );
+        final data = jsonDecode(request.body);
+        expect(data['p_unlimited_generation'], true);
+        expect(data['p_manual_cooldown_minutes'], 0);
+        return jsonResponse({}, 200);
+      });
+      await VerificationRepository(client).updateAutomationSettings(
+        unlimitedGeneration: true,
+        enabled: true,
+        maxArticlesPerRun: 6,
+        maxDraftsPerRun: 2,
+        maxDraftsPerDay: 4,
+        monthlyDraftCap: 40,
+        monthlyGroqRequestCap: 80,
+        maxPendingDrafts: 40,
+        manualCooldownMinutes: 0,
+      );
+    },
+  );
+
+  test('Verify model preserves unlimited policy and zero cooldown', () {
+    final settings = VerificationAutomationOverview.fromMap({
+      'settings': {'unlimited_generation': true, 'manual_cooldown_minutes': 0},
+      'drafts_today': 10000,
+      'remaining_today': null,
+    });
+    expect(settings.unlimitedGeneration, true);
+    expect(settings.manualCooldownMinutes, 0);
+    expect(
+      VerificationAutomationOverview.defaults().unlimitedGeneration,
+      false,
+    );
+  });
+
+  test(
+    'Verify controller reloads server availability when enabling unlimited and restoring limits',
+    () async {
+      var unlimited = false;
+      var cooldown = 15;
+      var overviewReads = 0;
+      final client = clientFor((request) async {
+        if (request.url.path.endsWith(
+          '/update_verification_automation_settings',
+        )) {
+          final data = jsonDecode(request.body);
+          unlimited = data['p_unlimited_generation'] == true;
+          cooldown = data['p_manual_cooldown_minutes'] as int;
+          return jsonResponse({}, 200);
+        }
+        if (request.url.path.endsWith(
+          '/get_verification_automation_overview',
+        )) {
+          overviewReads++;
+          return jsonResponse({
+            'settings': {
+              'unlimited_generation': unlimited,
+              'manual_cooldown_minutes': cooldown,
+            },
+            'cooldown_remaining_minutes': unlimited ? 0 : cooldown,
+          }, 200);
+        }
+        return jsonResponse([], 200);
+      });
+      final controller = VerificationStudioController(
+        repository: VerificationRepository(client),
+      );
+      addTearDown(controller.dispose);
+      await controller.bindAdministrator(true);
+      for (final unlimitedMode in [true, false]) {
+        expect(
+          await controller.saveAutomationSettings(
+            unlimitedGeneration: unlimitedMode,
+            enabled: true,
+            maxArticlesPerRun: 6,
+            maxDraftsPerRun: 2,
+            maxDraftsPerDay: 4,
+            monthlyDraftCap: 40,
+            monthlyGroqRequestCap: 80,
+            maxPendingDrafts: 40,
+            manualCooldownMinutes: 15,
+          ),
+          isTrue,
+        );
+        expect(
+          controller.automationOverview.unlimitedGeneration,
+          unlimitedMode,
+        );
+        expect(controller.generationCooldownMinutes, unlimitedMode ? 0 : 15);
+      }
+      expect(overviewReads, 2);
+    },
+  );
 
   test(
     'approved bank reads approval metadata without requiring a new column on older servers',

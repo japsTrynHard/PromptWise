@@ -225,6 +225,97 @@ void main() {
     });
   }
 
+  for (final width in [320.0, 1280.0]) {
+    for (final verify in [false, true]) {
+      testWidgets(
+        'tipid defaults and unlimited settings work at $width, verify=$verify',
+        (tester) async {
+          _viewport(tester, width);
+          final automation = _Automation();
+          final studio = _Verification();
+          final awareness = _Awareness();
+          addTearDown(automation.dispose);
+          addTearDown(studio.dispose);
+          addTearDown(awareness.dispose);
+          await _mount(tester, automation, studio, awareness, verify: verify);
+          final settingsButton = find.text('Automation settings');
+          await tester.ensureVisible(settingsButton);
+          await tester.tap(settingsButton);
+          await tester.pumpAndSettle();
+          if (verify) {
+            final monthly = find.widgetWithText(
+              TextFormField,
+              'Monthly Verify draft cap',
+            );
+            await tester.ensureVisible(monthly);
+            await tester.enterText(monthly, '');
+            final unlimited = find.widgetWithText(
+              SwitchListTile,
+              'Unlimited generation',
+            );
+            await tester.ensureVisible(unlimited);
+            await tester.tap(unlimited);
+            await tester.pumpAndSettle();
+            expect(tester.widget<TextFormField>(monthly).enabled, isFalse);
+            await tester.tap(find.text('Save settings'));
+            await tester.pumpAndSettle();
+            expect(studio.unlimitedSaved, isTrue);
+            expect(find.text('Unlimited'), findsNWidgets(2));
+            await tester.ensureVisible(settingsButton);
+            await tester.tap(settingsButton);
+            await tester.pumpAndSettle();
+          } else {
+            final cooldown = find.widgetWithText(
+              TextFormField,
+              'Manual generation cooldown',
+            );
+            await tester.ensureVisible(cooldown);
+            await tester.enterText(cooldown, '0');
+          }
+          await tester.tap(find.text('Restore tipid defaults'));
+          await tester.pumpAndSettle();
+          final cooldown = find.widgetWithText(
+            TextFormField,
+            verify
+                ? 'Manual successful-run cooldown'
+                : 'Manual generation cooldown',
+          );
+          expect(
+            tester.widget<TextFormField>(cooldown).controller!.text,
+            verify ? '15' : '30',
+          );
+          if (verify) {
+            expect(
+              tester
+                  .widget<SwitchListTile>(
+                    find.widgetWithText(SwitchListTile, 'Unlimited generation'),
+                  )
+                  .value,
+              isFalse,
+            );
+            expect(
+              studio.unlimitedSaved,
+              isTrue,
+            ); // Not saved until explicitly submitted.
+          } else {
+            expect(automation.savedCooldown, isNull);
+            final topic = find.widgetWithText(CheckboxListTile, 'Context');
+            await tester.ensureVisible(topic);
+            await tester.tap(topic);
+          }
+          await tester.tap(find.text('Save settings'));
+          await tester.pumpAndSettle();
+          expect(
+            verify ? studio.unlimitedSaved : automation.savedCooldown == 0,
+            isFalse,
+          );
+          if (!verify) expect(automation.savedCooldown, 30);
+          expect(tester.takeException(), isNull);
+        },
+      );
+    }
+  }
+
   testWidgets('zero cooldown can be saved during an existing wait', (
     tester,
   ) async {
@@ -540,6 +631,40 @@ class _Automation extends ContentAutomationController {
 }
 
 class _Verification extends VerificationStudioController {
+  VerificationAutomationOverview? savedOverview;
+  bool get unlimitedSaved => savedOverview?.unlimitedGeneration ?? false;
+  @override
+  VerificationAutomationOverview get automationOverview =>
+      savedOverview ?? super.automationOverview;
+  @override
+  Future<bool> saveAutomationSettings({
+    bool unlimitedGeneration = false,
+    required bool enabled,
+    required int maxArticlesPerRun,
+    required int maxDraftsPerRun,
+    required int maxDraftsPerDay,
+    required int monthlyDraftCap,
+    required int monthlyGroqRequestCap,
+    required int maxPendingDrafts,
+    required int manualCooldownMinutes,
+  }) async {
+    savedOverview = VerificationAutomationOverview.fromMap({
+      'settings': {
+        'enabled': enabled,
+        'unlimited_generation': unlimitedGeneration,
+        'max_articles_per_run': maxArticlesPerRun,
+        'max_drafts_per_run': maxDraftsPerRun,
+        'max_drafts_per_day': maxDraftsPerDay,
+        'monthly_draft_cap': monthlyDraftCap,
+        'monthly_groq_request_cap': monthlyGroqRequestCap,
+        'max_pending_drafts': maxPendingDrafts,
+        'manual_cooldown_minutes': manualCooldownMinutes,
+      },
+    });
+    notifyListeners();
+    return true;
+  }
+
   final int draftCount;
   final int bankCount;
   _Verification({this.draftCount = 0, this.bankCount = 0});
