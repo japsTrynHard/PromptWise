@@ -240,6 +240,27 @@ void main() {
       expect(automation.skills, isNull);
     },
   );
+
+  testWidgets(
+    'Verify partial success stays in Verify and is not a total-failure banner',
+    (tester) async {
+      _viewport(tester, 1280);
+      final automation = _Automation(partialVerifyWarning: true);
+      final studio = _Verification();
+      final awareness = _Awareness();
+      addTearDown(automation.dispose);
+      addTearDown(studio.dispose);
+      addTearDown(awareness.dispose);
+      await _mount(tester, automation, studio, awareness, verify: true);
+      expect(
+        find.text('Drafts saved; some requests need retry'),
+        findsOneWidget,
+      );
+      expect(find.text('Generation could not complete'), findsNothing);
+      await _mount(tester, automation, studio, awareness);
+      expect(find.text('Drafts saved; some requests need retry'), findsNothing);
+    },
+  );
 }
 
 void _viewport(WidgetTester tester, double width) {
@@ -316,10 +337,22 @@ Future<void> _preview(WidgetTester tester, String name) async {
 }
 
 class _Automation extends ContentAutomationController {
+  final bool partialVerifyWarning;
   final bool cooldown;
   final int draftCount;
   final int bankCount;
-  _Automation({this.cooldown = false, this.draftCount = 0, this.bankCount = 0});
+  _Automation({
+    this.cooldown = false,
+    this.draftCount = 0,
+    this.bankCount = 0,
+    this.partialVerifyWarning = false,
+  });
+  @override
+  String? get warningMessage => partialVerifyWarning
+      ? '4 drafts saved for review. Retry remaining topics later.'
+      : null;
+  @override
+  String? get generationScope => partialVerifyWarning ? 'verification' : null;
   @override
   List<QuestionBankReviewItem> get approvedQuestions => [
     for (var i = 0; i < bankCount; i++)

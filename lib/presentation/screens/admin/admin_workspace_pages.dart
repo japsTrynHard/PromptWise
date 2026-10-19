@@ -520,19 +520,23 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
                             selected: _role == role,
                             onSelected: (_) => setState(() => _role = role),
                           ),
-                        DropdownButton<String>(
-                          value: _sort,
-                          items: const [
-                            DropdownMenuItem(
-                              value: 'newest',
-                              child: Text('Newest profiles'),
-                            ),
-                            DropdownMenuItem(
-                              value: 'name',
-                              child: Text('Name A–Z'),
-                            ),
-                          ],
-                          onChanged: (v) => setState(() => _sort = v!),
+                        SizedBox(
+                          width: 200,
+                          child: DropdownButton<String>(
+                            isExpanded: true,
+                            value: _sort,
+                            items: const [
+                              DropdownMenuItem(
+                                value: 'newest',
+                                child: Text('Newest profiles'),
+                              ),
+                              DropdownMenuItem(
+                                value: 'name',
+                                child: Text('Name A–Z'),
+                              ),
+                            ],
+                            onChanged: (v) => setState(() => _sort = v!),
+                          ),
                         ),
                       ],
                     ),

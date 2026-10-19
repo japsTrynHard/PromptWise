@@ -16,6 +16,7 @@ import '../../widgets/section_header.dart';
 import '../../widgets/state_message.dart';
 import '../../widgets/studio_generation_widgets.dart';
 import '../../widgets/draft_queue_widgets.dart';
+import '../../widgets/verification_draft_review.dart';
 
 class AdminVerificationStudioScreen extends StatefulWidget {
   const AdminVerificationStudioScreen({super.key});
@@ -320,32 +321,12 @@ class _AdminVerificationStudioScreenState
     VerificationStudioController controller,
     VerificationCaseDraft draft,
   ) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Approve verification case?'),
-        content: Text(
-          'Approve “${draft.title}” only after checking that its source, evidence, keyed decision, and explanation are accurate. The case becomes learner-eligible after approval.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.pop(dialogContext, false);
-            },
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () {
-              Navigator.pop(dialogContext, true);
-            },
-            child: const Text('Approve'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmed == true) {
+    final action = await showVerificationDraftReview(context, draft);
+    if (!context.mounted) return;
+    if (action == DraftReviewAction.approve) {
       await controller.approveDraft(draft.id);
+    } else if (action == DraftReviewAction.reject) {
+      await _confirmReject(context, controller, draft);
     }
   }
 
@@ -758,7 +739,18 @@ class _FreshDraftPanel extends StatelessWidget {
               ),
             ),
           ],
-          if (automation.actionErrorMessage != null) ...[
+          if (automation.warningMessage != null &&
+              automation.generationScope != 'learning') ...[
+            const SizedBox(height: AppSpacing.md),
+            StudioNotice(
+              title: 'Drafts saved; some requests need retry',
+              message: automation.warningMessage!,
+              isWarning: true,
+              onDismiss: automation.clearMessages,
+            ),
+          ],
+          if (automation.actionErrorMessage != null &&
+              automation.generationScope != 'learning') ...[
             const SizedBox(height: AppSpacing.md),
             StudioNotice(
               title: 'Generation could not complete',
@@ -767,7 +759,8 @@ class _FreshDraftPanel extends StatelessWidget {
               onDismiss: automation.clearMessages,
             ),
           ],
-          if (automation.successMessage != null) ...[
+          if (automation.successMessage != null &&
+              automation.generationScope != 'learning') ...[
             const SizedBox(height: AppSpacing.md),
             StudioNotice(
               title: 'Generation result',
@@ -1204,7 +1197,7 @@ class _DraftCard extends StatelessWidget {
               FilledButton.icon(
                 onPressed: busy ? null : onApprove,
                 icon: const Icon(Icons.fact_check_outlined),
-                label: const Text('Approve case'),
+                label: const Text('Review / approve'),
               ),
             ],
           ),
