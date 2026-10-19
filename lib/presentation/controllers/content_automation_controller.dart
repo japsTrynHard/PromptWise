@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 
 import '../../data/models/content_automation.dart';
 import '../../data/models/learning_topic.dart';
+import '../../data/models/verification.dart';
 import '../../data/repositories/content_automation_repository.dart';
 
 class ContentAutomationController extends ChangeNotifier {
@@ -18,6 +19,7 @@ class ContentAutomationController extends ChangeNotifier {
   bool _isMutating = false;
   bool _hasLoaded = false;
   String? _errorMessage;
+  String? _loadErrorMessage;
   String? _successMessage;
   List<ContentSource> _sources = const [];
   List<GeneratedContentDraft> _drafts = const [];
@@ -31,7 +33,9 @@ class ContentAutomationController extends ChangeNotifier {
   bool get isMutating => _isMutating;
   bool get hasLoaded => _hasLoaded;
   bool get isAdministrator => _isAdministrator;
-  String? get errorMessage => _errorMessage;
+  String? get errorMessage => _errorMessage ?? _loadErrorMessage;
+  String? get loadErrorMessage => _loadErrorMessage;
+  String? get actionErrorMessage => _errorMessage;
   String? get successMessage => _successMessage;
   List<ContentSource> get sources => List.unmodifiable(_sources);
   List<GeneratedContentDraft> get drafts => List.unmodifiable(_drafts);
@@ -65,6 +69,7 @@ class ContentAutomationController extends ChangeNotifier {
     _settings = AutomationSettings.defaults();
     _queueHealth = QueueLifecycleStats.empty();
     _errorMessage = null;
+    _loadErrorMessage = null;
     _successMessage = null;
     _hasLoaded = false;
     _isLoading = false;
@@ -78,7 +83,7 @@ class ContentAutomationController extends ChangeNotifier {
     final epoch = _adminEpoch;
 
     _isLoading = true;
-    _errorMessage = null;
+    _loadErrorMessage = null;
     notifyListeners();
 
     final failedSections = <String>[];
@@ -153,7 +158,7 @@ class ContentAutomationController extends ChangeNotifier {
 
       _hasLoaded = true;
       if (failedSections.isNotEmpty) {
-        _errorMessage =
+        _loadErrorMessage =
             'Learning Studio opened, but some online sections could not load: ${failedSections.join(', ')}. Check the Phase 7 Supabase policies/data, then retry.';
       }
     } finally {
@@ -255,9 +260,13 @@ class ContentAutomationController extends ChangeNotifier {
     });
   }
 
-  Future<bool> runVerificationDraftsNow() async {
+  Future<bool> runVerificationDraftsNow({
+    List<VerificationSubskill> focusSkills = const [],
+  }) async {
     return _mutate((isCurrent) async {
-      final message = await _requireRepository().runVerificationDraftsNow();
+      final message = await _requireRepository().runVerificationDraftsNow(
+        focusSkills: focusSkills,
+      );
       if (!isCurrent()) return;
       _successMessage = message;
       // Verification Studio owns the Verify draft/case data and refreshes only

@@ -3,6 +3,34 @@ import 'package:promptwise/data/models/content_automation.dart';
 import 'package:promptwise/data/models/learning_topic.dart';
 
 void main() {
+  test(
+    'learning cooldown applies globally and expires without changing topics',
+    () {
+      final started = DateTime.utc(2026, 10, 19, 12);
+      final settings = AutomationSettings.fromMap({
+        'last_manual_run_at': started.toIso8601String(),
+        'manual_cooldown_minutes': 30,
+        'focus_topics': ['context'],
+      });
+      expect(settings.cooldownRemainingAt(started), 30);
+      expect(
+        settings.cooldownRemainingAt(
+          started.add(const Duration(minutes: 29, seconds: 30)),
+        ),
+        1,
+      );
+      expect(
+        settings.cooldownRemainingAt(started.add(const Duration(minutes: 30))),
+        0,
+      );
+      expect(
+        settings.cooldownRemainingAt(started.add(const Duration(hours: 1))),
+        0,
+      );
+      expect(AutomationSettings.defaults().cooldownRemainingAt(started), 0);
+      expect(settings.focusTopics, [LearningTopic.context]);
+    },
+  );
   test('an unconfigured schedule has no default focus area', () {
     expect(AutomationSettings.defaults().focusTopics, isEmpty);
     expect(AutomationSettings.fromMap({}).focusTopics, isEmpty);

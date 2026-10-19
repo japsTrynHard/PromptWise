@@ -63,6 +63,16 @@ class AutomationSettings {
   /// Saved focus areas for scheduled lesson generation. Empty means not configured.
   final List<LearningTopic> focusTopics;
 
+  int get cooldownRemainingMinutes => cooldownRemainingAt(DateTime.now());
+
+  int cooldownRemainingAt(DateTime now) {
+    if (lastManualRunAt == null) return 0;
+    final remaining = lastManualRunAt!
+        .add(Duration(minutes: manualCooldownMinutes))
+        .difference(now);
+    return remaining.isNegative ? 0 : (remaining.inMilliseconds / 60000).ceil();
+  }
+
   const AutomationSettings({
     required this.enabled,
     required this.maxArticlesPerRun,

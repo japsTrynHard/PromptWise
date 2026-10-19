@@ -3,6 +3,7 @@ import { XMLParser } from 'npm:fast-xml-parser@4.5.3';
 import { classifyRun, queueIsFull, validateLessonDraft } from './quality.mjs';
 import {
   enforceDraftFocus, resolveFocusTopics, selectCandidateFocus, textSupportsFocus,
+  validateVerificationFocus, enforceVerificationFocus,
 } from './focus.mjs';
 
 const corsHeaders = {
@@ -210,6 +211,7 @@ Deno.serve(async (req) => {
     // Only authorized admins may supply one-run overrides. Scheduled requests
     // MUST read the saved focus list and ignore any caller-provided override.
     let focusTopics: string[] | null;
+    let verificationFocus: string[] | undefined;
     try {
       focusTopics = resolveFocusTopics({
         mode,
@@ -217,6 +219,11 @@ Deno.serve(async (req) => {
         savedTopics: settings.focus_topics,
         requestedTopics: body.focus_topics,
       }) as string[] | null;
+      // Scheduled runs retain their existing configuration. A manual picker
+      // selection is a one-run override and must never become a saved setting.
+      if (mode === 'manual' && target === 'verification' && body.focus_skills !== undefined) {
+        verificationFocus = validateVerificationFocus(body.focus_skills);
+      }
     } catch (error) {
       throw new HttpError(mode === 'manual' ? 400 : 500, errorMessage(error));
     }
@@ -495,6 +502,7 @@ Deno.serve(async (req) => {
           maxDrafts: verificationBudget,
           maxArticles: Math.max(1, Math.min(20, Number(verificationSettings.max_articles_per_run ?? 6))),
           groqBudget,
+          focusSkills: verificationFocus,
         });
 
         const hardFailures =
@@ -1197,12 +1205,14 @@ async function generateVerificationDraftsFromAwareness({
   maxDrafts,
   maxArticles,
   groqBudget,
+  focusSkills,
 }: {
   service: ReturnType<typeof createClient>;
   apiKey: string;
   maxDrafts: number;
   maxArticles: number;
   groqBudget: GroqRequestBudget;
+  focusSkills?: string[];
 }): Promise<VerificationGenerationStats> {
   const stats: VerificationGenerationStats = {
     rowsFound: 0,
@@ -1315,6 +1325,7 @@ async function generateVerificationDraftsFromAwareness({
         articleText,
         category: textValue(row.category),
         region: textValue(row.region),
+        focusSkill: focusSkills?.[stats.created % focusSkills.length],
       });
       validateVerificationCaseDraft(verificationCase);
     } catch (draftError) {
@@ -1452,6 +1463,7 @@ async function generateVerificationCaseOnly({
   articleText,
   category,
   region,
+  focusSkill,
 }: {
   service: ReturnType<typeof createClient>;
   apiKey: string;
@@ -1461,8 +1473,14 @@ async function generateVerificationCaseOnly({
   articleText: string;
   category: string;
   region: string;
+  focusSkill?: string;
 }): Promise<GeneratedVerificationCase> {
   const prompt = `You create ONE administrator-review DRAFT for PromptWise Verify.
+
+${focusSkill ? `ADMIN-SELECTED SKILL (MANDATORY): ${focusSkill}
+- subskill MUST be exactly ${focusSkill}. Do not substitute another skill.
+- Ground the reasoning and evidence in this skill using only the supplied source.
+- If the source cannot support this skill, do not invent supporting facts.` : ''}
 
 SOURCE SAFETY:
 - Use ONLY the supplied article material for event-specific facts.
@@ -1490,7 +1508,7 @@ Return STRICT JSON only with exactly this shape:
   "title":"...",
   "summary":"...",
   "case_type":"claim",
-  "subskill":"claim_verification",
+  "subskill":"${focusSkill ?? 'claim_verification'}",
   "difficulty":2,
   "scenario":"...",
   "claim_text":"...",
@@ -1605,6 +1623,7 @@ ${articleText.slice(0, MAX_ARTICLE_TEXT)}`;
       const content = textValue(message.content);
       const parsed = parseJsonObject(content) as unknown as GeneratedVerificationCase;
       validateVerificationCaseDraft(parsed);
+      enforceVerificationFocus(parsed, focusSkill);
       if (usageId) {
         await service
           .from('verification_groq_requests')

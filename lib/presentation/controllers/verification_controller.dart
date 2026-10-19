@@ -7,7 +7,7 @@ class VerificationController extends ChangeNotifier {
   final VerificationRepository? _repository;
 
   VerificationController({VerificationRepository? repository})
-      : _repository = repository;
+    : _repository = repository;
 
   String? _activeUserId;
   int _requestEpoch = 0;
@@ -99,7 +99,9 @@ class VerificationController extends ChangeNotifier {
     Duration maxAge = const Duration(minutes: 5),
   }) async {
     final last = _lastLoadedAt;
-    if (_hasLoaded && last != null && DateTime.now().difference(last) < maxAge) {
+    if (_hasLoaded &&
+        last != null &&
+        DateTime.now().difference(last) < maxAge) {
       return;
     }
     await refresh(force: false);
@@ -116,7 +118,8 @@ class VerificationController extends ChangeNotifier {
     if (!force &&
         _hasLoaded &&
         _lastLoadedAt != null &&
-        DateTime.now().difference(_lastLoadedAt!) < const Duration(minutes: 5)) {
+        DateTime.now().difference(_lastLoadedAt!) <
+            const Duration(minutes: 5)) {
       return Future<void>.value();
     }
 
@@ -161,10 +164,7 @@ class VerificationController extends ChangeNotifier {
     }
   }
 
-  Future<bool> startSession({
-    int caseCount = 5,
-    required int rankLevel,
-  }) async {
+  Future<bool> startSession({int caseCount = 5, required int rankLevel}) async {
     final repository = _repository;
     final userId = _activeUserId;
     final epoch = _requestEpoch;
@@ -242,7 +242,8 @@ class VerificationController extends ChangeNotifier {
           subskill: result.subskill,
           mastery: result.subskillMasteryAfter!,
           attempts: previous.attempts + (result.countedForMastery ? 1 : 0),
-          successfulAttempts: previous.successfulAttempts +
+          successfulAttempts:
+              previous.successfulAttempts +
               (result.countedForMastery && result.decisionCorrect ? 1 : 0),
           lastPracticedAt: DateTime.now(),
           nextReviewAt: previous.nextReviewAt,
@@ -349,9 +350,9 @@ class VerificationController extends ChangeNotifier {
   }
 
   Map<VerificationSubskill, VerificationSubskillMastery> _initialMastery() => {
-        for (final subskill in VerificationSubskill.values)
-          subskill: VerificationSubskillMastery.initial(subskill),
-      };
+    for (final subskill in VerificationSubskill.values)
+      subskill: VerificationSubskillMastery.initial(subskill),
+  };
 
   bool _isCurrentRequest(String userId, int epoch) =>
       _activeUserId == userId && _requestEpoch == epoch;
@@ -375,7 +376,9 @@ class VerificationController extends ChangeNotifier {
         text.contains('timeout')) {
       return 'Quick Check needs an internet connection so your answers can be saved.';
     }
-    if (text.contains('jwt') || text.contains('unauthorized') || text.contains('401')) {
+    if (text.contains('jwt') ||
+        text.contains('unauthorized') ||
+        text.contains('401')) {
       return 'Your session expired. Sign in again, then reopen Verify.';
     }
     return 'Quick Check could not continue. Please try again.';
@@ -386,7 +389,7 @@ class VerificationStudioController extends ChangeNotifier {
   final VerificationRepository? _repository;
 
   VerificationStudioController({VerificationRepository? repository})
-      : _repository = repository;
+    : _repository = repository;
 
   bool _isAdministrator = false;
   int _adminEpoch = 0;
@@ -400,6 +403,7 @@ class VerificationStudioController extends ChangeNotifier {
   List<VerificationCase> _cases = const [];
   VerificationAutomationOverview _automationOverview =
       VerificationAutomationOverview.defaults();
+  DateTime? _automationOverviewLoadedAt;
 
   bool get isAdministrator => _isAdministrator;
   bool get isLoading => _isLoading;
@@ -411,6 +415,15 @@ class VerificationStudioController extends ChangeNotifier {
   List<VerificationCaseHealth> get health => List.unmodifiable(_health);
   List<VerificationCase> get cases => List.unmodifiable(_cases);
   VerificationAutomationOverview get automationOverview => _automationOverview;
+  int get generationCooldownMinutes {
+    final elapsed = _automationOverviewLoadedAt == null
+        ? 0
+        : DateTime.now().difference(_automationOverviewLoadedAt!).inMinutes;
+    return (_automationOverview.cooldownRemainingMinutes - elapsed).clamp(
+      0,
+      _automationOverview.cooldownRemainingMinutes,
+    );
+  }
 
   Future<void> bindAdministrator(bool isAdministrator) async {
     final changed = _isAdministrator != isAdministrator;
@@ -424,6 +437,7 @@ class VerificationStudioController extends ChangeNotifier {
       _health = const [];
       _cases = const [];
       _automationOverview = VerificationAutomationOverview.defaults();
+      _automationOverviewLoadedAt = null;
       _hasLoaded = false;
       _errorMessage = null;
       _successMessage = null;
@@ -480,6 +494,9 @@ class VerificationStudioController extends ChangeNotifier {
 
       try {
         nextOverview = await overviewFuture;
+        if (_isCurrentAdmin(epoch)) {
+          _automationOverviewLoadedAt = DateTime.now();
+        }
       } catch (_) {
         failures.add('Verify automation limits');
       }
@@ -511,60 +528,58 @@ class VerificationStudioController extends ChangeNotifier {
     required int monthlyGroqRequestCap,
     required int maxPendingDrafts,
     required int manualCooldownMinutes,
-  }) =>
-      _mutate(
-        successMessage: 'Verify automation limits updated.',
-        refreshAfter: false,
-        action: () async {
-          await _requireRepository().updateAutomationSettings(
-            enabled: enabled,
-            maxArticlesPerRun: maxArticlesPerRun,
-            maxDraftsPerRun: maxDraftsPerRun,
-            maxDraftsPerDay: maxDraftsPerDay,
-            monthlyDraftCap: monthlyDraftCap,
-            monthlyGroqRequestCap: monthlyGroqRequestCap,
-            maxPendingDrafts: maxPendingDrafts,
-            manualCooldownMinutes: manualCooldownMinutes,
-          );
-          final current = _automationOverview;
-          _automationOverview = VerificationAutomationOverview(
-            enabled: enabled,
-            maxArticlesPerRun: maxArticlesPerRun,
-            maxDraftsPerRun: maxDraftsPerRun,
-            maxDraftsPerDay: maxDraftsPerDay,
-            monthlyDraftCap: monthlyDraftCap,
-            monthlyGroqRequestCap: monthlyGroqRequestCap,
-            maxPendingDrafts: maxPendingDrafts,
-            manualCooldownMinutes: manualCooldownMinutes,
-            pendingDrafts: current.pendingDrafts,
-            draftsToday: current.draftsToday,
-            draftsThisMonth: current.draftsThisMonth,
-            groqRequestsThisMonth: current.groqRequestsThisMonth,
-            groqRequestsRemaining:
-                (monthlyGroqRequestCap - current.groqRequestsThisMonth)
-                    .clamp(0, monthlyGroqRequestCap)
-                    .toInt(),
-            cooldownRemainingMinutes: current.cooldownRemainingMinutes,
-            remainingToday: (maxDraftsPerDay - current.draftsToday)
-                .clamp(0, maxDraftsPerDay)
-                .toInt(),
-            remainingThisMonth: (monthlyDraftCap - current.draftsThisMonth)
-                .clamp(0, monthlyDraftCap)
-                .toInt(),
-          );
-        },
+  }) => _mutate(
+    successMessage: 'Verify automation limits updated.',
+    refreshAfter: false,
+    action: () async {
+      await _requireRepository().updateAutomationSettings(
+        enabled: enabled,
+        maxArticlesPerRun: maxArticlesPerRun,
+        maxDraftsPerRun: maxDraftsPerRun,
+        maxDraftsPerDay: maxDraftsPerDay,
+        monthlyDraftCap: monthlyDraftCap,
+        monthlyGroqRequestCap: monthlyGroqRequestCap,
+        maxPendingDrafts: maxPendingDrafts,
+        manualCooldownMinutes: manualCooldownMinutes,
       );
-
+      final current = _automationOverview;
+      _automationOverview = VerificationAutomationOverview(
+        enabled: enabled,
+        maxArticlesPerRun: maxArticlesPerRun,
+        maxDraftsPerRun: maxDraftsPerRun,
+        maxDraftsPerDay: maxDraftsPerDay,
+        monthlyDraftCap: monthlyDraftCap,
+        monthlyGroqRequestCap: monthlyGroqRequestCap,
+        maxPendingDrafts: maxPendingDrafts,
+        manualCooldownMinutes: manualCooldownMinutes,
+        pendingDrafts: current.pendingDrafts,
+        draftsToday: current.draftsToday,
+        draftsThisMonth: current.draftsThisMonth,
+        groqRequestsThisMonth: current.groqRequestsThisMonth,
+        groqRequestsRemaining:
+            (monthlyGroqRequestCap - current.groqRequestsThisMonth)
+                .clamp(0, monthlyGroqRequestCap)
+                .toInt(),
+        cooldownRemainingMinutes: current.cooldownRemainingMinutes,
+        remainingToday: (maxDraftsPerDay - current.draftsToday)
+            .clamp(0, maxDraftsPerDay)
+            .toInt(),
+        remainingThisMonth: (monthlyDraftCap - current.draftsThisMonth)
+            .clamp(0, monthlyDraftCap)
+            .toInt(),
+      );
+    },
+  );
 
   Future<bool> approveDraft(String draftId) => _mutate(
-        successMessage: 'Verification case approved to the published case bank.',
-        action: () => _requireRepository().approveDraft(draftId),
-      );
+    successMessage: 'Verification case approved to the published case bank.',
+    action: () => _requireRepository().approveDraft(draftId),
+  );
 
   Future<bool> rejectDraft(String draftId) => _mutate(
-        successMessage: 'Verification case draft rejected.',
-        action: () => _requireRepository().rejectDraft(draftId),
-      );
+    successMessage: 'Verification case draft rejected.',
+    action: () => _requireRepository().rejectDraft(draftId),
+  );
 
   Future<bool> updateCase({
     required VerificationCase item,
@@ -578,28 +593,27 @@ class VerificationStudioController extends ChangeNotifier {
     required VerificationConfidence expectedConfidence,
     required String explanation,
     required String learningPoint,
-  }) =>
-      _mutate(
-        successMessage: 'Verification case updated.',
-        action: () => _requireRepository().updateCase(
-          caseId: item.id,
-          title: title,
-          scenario: scenario,
-          claimText: claimText,
-          subskill: subskill,
-          caseType: caseType,
-          difficulty: difficulty,
-          correctDecision: correctDecision,
-          expectedConfidence: expectedConfidence,
-          explanation: explanation,
-          learningPoint: learningPoint,
-        ),
-      );
+  }) => _mutate(
+    successMessage: 'Verification case updated.',
+    action: () => _requireRepository().updateCase(
+      caseId: item.id,
+      title: title,
+      scenario: scenario,
+      claimText: claimText,
+      subskill: subskill,
+      caseType: caseType,
+      difficulty: difficulty,
+      correctDecision: correctDecision,
+      expectedConfidence: expectedConfidence,
+      explanation: explanation,
+      learningPoint: learningPoint,
+    ),
+  );
 
   Future<bool> archiveCase(String caseId) => _mutate(
-        successMessage: 'Verification case archived.',
-        action: () => _requireRepository().archiveCase(caseId),
-      );
+    successMessage: 'Verification case archived.',
+    action: () => _requireRepository().archiveCase(caseId),
+  );
 
   void clearMessages() {
     _errorMessage = null;
@@ -631,7 +645,8 @@ class VerificationStudioController extends ChangeNotifier {
       return _isCurrentAdmin(epoch);
     } catch (_) {
       if (_isCurrentAdmin(epoch)) {
-        _errorMessage = 'The Verification Studio action could not be completed.';
+        _errorMessage =
+            'The Verification Studio action could not be completed.';
       }
       return false;
     } finally {
@@ -642,8 +657,7 @@ class VerificationStudioController extends ChangeNotifier {
     }
   }
 
-  bool _isCurrentAdmin(int epoch) =>
-      _isAdministrator && _adminEpoch == epoch;
+  bool _isCurrentAdmin(int epoch) => _isAdministrator && _adminEpoch == epoch;
 
   VerificationRepository _requireRepository() {
     final repository = _repository;

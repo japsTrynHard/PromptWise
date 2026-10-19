@@ -2,6 +2,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/content_automation.dart';
 import '../models/learning_topic.dart';
+import '../models/verification.dart';
 
 class ContentAutomationRepository {
   final SupabaseClient _client;
@@ -141,9 +142,16 @@ class ContentAutomationRepository {
     );
   }
 
-  Future<String> runVerificationDraftsNow() async {
+  Future<String> runVerificationDraftsNow({
+    List<VerificationSubskill> focusSkills = const [],
+  }) async {
     return _invokeAutomation(
-      body: const {'mode': 'manual', 'target': 'verification'},
+      body: {
+        'mode': 'manual',
+        'target': 'verification',
+        if (focusSkills.isNotEmpty)
+          'focus_skills': focusSkills.map((skill) => skill.id).toSet().toList(),
+      },
       failureMessage: 'Verification draft generation could not be started.',
     );
   }

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -12,6 +14,7 @@ import '../../widgets/app_card.dart';
 import '../../widgets/page_intro.dart';
 import '../../widgets/section_header.dart';
 import '../../widgets/state_message.dart';
+import '../../widgets/studio_generation_widgets.dart';
 
 class AdminVerificationStudioScreen extends StatefulWidget {
   const AdminVerificationStudioScreen({super.key});
@@ -24,9 +27,25 @@ class AdminVerificationStudioScreen extends StatefulWidget {
 class _AdminVerificationStudioScreenState
     extends State<AdminVerificationStudioScreen> {
   bool _initialLoadRequested = false;
+  bool _preparingGeneration = false;
   String _query = '';
   VerificationSubskill? _subskillFilter;
   int? _levelFilter;
+  Timer? _cooldownTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _cooldownTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _cooldownTimer?.cancel();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -61,7 +80,7 @@ class _AdminVerificationStudioScreenState
             const PageIntro(
               title: 'Verification Studio',
               description:
-                  'Review AI-drafted Verify cases from current trusted sources, approve only the good ones, and manage the question bank learners can receive.',
+                  'Create focused verification cases, review the evidence, and grow your case library.',
             ),
             const SizedBox(height: AppSpacing.xl),
             if (!controller.isAdministrator)
@@ -76,35 +95,77 @@ class _AdminVerificationStudioScreenState
               _FreshDraftPanel(
                 studio: controller,
                 automation: automation,
+                preparing: _preparingGeneration,
                 onGenerate: () async {
-                  final messenger = ScaffoldMessenger.of(context);
-                  final awareness = context.read<AwarenessFeedController>();
-
-                  // Remove a stale Learning Studio result before a Verify-only run.
-                  automation.clearMessages();
-
-                  final awarenessReady = await awareness.ensureCurrentSources();
-                  if (!mounted) return;
-
-                  // A failed live refresh must not block generation when recent
-                  // trusted Awareness rows are already cached in Supabase. The
-                  // content-automation function performs the authoritative source
-                  // query and will return the exact reason if nothing is eligible.
-                  if (!awarenessReady) {
-                    messenger.showSnackBar(
-                      SnackBar(
-                        content: Text(
-                          awareness.errorMessage ??
-                              'Live source refresh was unavailable. Trying the saved trusted source cache instead.',
-                        ),
+                  if (_preparingGeneration) return;
+                  setState(() => _preparingGeneration = true);
+                  try {
+                    final chosen = await showDialog<List<VerificationSubskill>>(
+                      context: context,
+                      builder: (_) => StudioFocusDialog<VerificationSubskill>(
+                        title: 'Create verification drafts',
+                        description:
+                            'Choose skills for this run only. Generation stays within your selected skills and existing limits.',
+                        options: VerificationSubskill.values
+                            .map(
+                              (skill) => StudioFocusOption(
+                                skill,
+                                skill.label,
+                                skill.shortDescription,
+                                switch (skill) {
+                                  VerificationSubskill.sourceVerification =>
+                                    Icons.travel_explore_rounded,
+                                  VerificationSubskill.claimVerification =>
+                                    Icons.fact_check_outlined,
+                                  VerificationSubskill.mediaProvenance =>
+                                    Icons.perm_media_outlined,
+                                  VerificationSubskill.manipulationDetection =>
+                                    Icons.image_search_outlined,
+                                  VerificationSubskill.citationVerification =>
+                                    Icons.format_quote_rounded,
+                                  VerificationSubskill.uncertaintyJudgment =>
+                                    Icons.help_outline_rounded,
+                                },
+                              ),
+                            )
+                            .toList(),
                       ),
                     );
-                  }
+                    if (chosen == null || !context.mounted) return;
+                    final messenger = ScaffoldMessenger.of(context);
+                    final awareness = context.read<AwarenessFeedController>();
 
-                  final created = await automation.runVerificationDraftsNow();
-                  if (!mounted) return;
-                  if (created) {
+                    // Remove a stale Learning Studio result before a Verify-only run.
+                    automation.clearMessages();
+
+                    final awarenessReady = await awareness
+                        .ensureCurrentSources();
+                    if (!mounted) return;
+
+                    // A failed live refresh must not block generation when recent
+                    // trusted Awareness rows are already cached in Supabase. The
+                    // content-automation function performs the authoritative source
+                    // query and will return the exact reason if nothing is eligible.
+                    if (!awarenessReady) {
+                      messenger.showSnackBar(
+                        SnackBar(
+                          content: Text(
+                            awareness.errorMessage ??
+                                'Live source refresh was unavailable. Trying the saved trusted source cache instead.',
+                          ),
+                        ),
+                      );
+                    }
+
+                    await automation.runVerificationDraftsNow(
+                      focusSkills: chosen,
+                    );
+                    if (!mounted) return;
+                    // Partial or failed runs may still consume budget or save
+                    // drafts. Keep the displayed availability authoritative.
                     await controller.refresh();
+                  } finally {
+                    if (mounted) setState(() => _preparingGeneration = false);
                   }
                 },
               ),
@@ -145,7 +206,7 @@ class _AdminVerificationStudioScreenState
               else if (controller.health.isEmpty)
                 const StateMessage.empty(
                   title: 'No verification health data',
-                  message: 'Run the Phase 9 SQL and refresh this page.',
+                  message: 'Refresh your workspace to check case coverage.',
                 )
               else
                 _HealthGrid(items: controller.health),
@@ -159,7 +220,7 @@ class _AdminVerificationStudioScreenState
               if (controller.drafts.isEmpty)
                 const AppCard(
                   child: Text(
-                    'No Verify drafts are waiting right now. Use Find fresh case drafts to turn recent trusted Awareness articles into new draft questions.',
+                    'Your review queue is clear. Choose verification skills above to create new case drafts.',
                   ),
                 )
               else
@@ -567,11 +628,13 @@ class _FreshDraftPanel extends StatelessWidget {
   final VerificationStudioController studio;
   final ContentAutomationController automation;
   final Future<void> Function() onGenerate;
+  final bool preparing;
 
   const _FreshDraftPanel({
     required this.studio,
     required this.automation,
     required this.onGenerate,
+    required this.preparing,
   });
 
   @override
@@ -579,180 +642,179 @@ class _FreshDraftPanel extends StatelessWidget {
     final theme = Theme.of(context);
     final limits = studio.automationOverview;
     final queueFull = limits.pendingDrafts >= limits.maxPendingDrafts;
-    final onCooldown = limits.cooldownRemainingMinutes > 0;
+    final cooldown = studio.generationCooldownMinutes;
+    final onCooldown = cooldown > 0;
     final budgetEmpty =
         limits.remainingToday <= 0 ||
         limits.remainingThisMonth <= 0 ||
         limits.groqRequestsRemaining <= 0 ||
         queueFull ||
         onCooldown;
-
+    final busy =
+        preparing ||
+        automation.isMutating ||
+        studio.isMutating ||
+        studio.isLoading;
     return AppCard(
-      backgroundColor: theme.colorScheme.primaryContainer.withValues(
-        alpha: 0.30,
-      ),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final copy = Column(
+      padding: const EdgeInsets.all(AppSpacing.lg),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                'Fresh AI drafts for Verify',
-                style: theme.textTheme.titleLarge?.copyWith(
-                  fontWeight: FontWeight.w700,
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.primaryContainer,
+                  borderRadius: BorderRadius.circular(AppRadius.md),
+                ),
+                child: Icon(
+                  Icons.auto_awesome_outlined,
+                  color: theme.colorScheme.primary,
                 ),
               ),
-              const SizedBox(height: AppSpacing.xs),
-              Text(
-                'PromptWise uses current trusted Awareness articles to draft Verify cases. Groq generation is budgeted here and every draft still requires administrator approval.',
-                style: theme.textTheme.bodyMedium,
-              ),
-              const SizedBox(height: AppSpacing.md),
-              Wrap(
-                spacing: AppSpacing.xs,
-                runSpacing: AppSpacing.xs,
-                children: [
-                  Chip(
-                    label: Text(
-                      limits.enabled ? 'Automation on' : 'Automation off',
-                    ),
-                  ),
-                  Chip(label: Text('${limits.maxArticlesPerRun} articles/run')),
-                  Chip(label: Text('${limits.maxDraftsPerRun} drafts/run')),
-                  Chip(
-                    label: Text(
-                      '${limits.draftsToday}/${limits.maxDraftsPerDay} today',
-                    ),
-                  ),
-                  Chip(
-                    label: Text(
-                      '${limits.draftsThisMonth}/${limits.monthlyDraftCap} this month',
-                    ),
-                  ),
-                  Chip(
-                    label: ConstrainedBox(
-                      constraints: BoxConstraints(
-                        maxWidth: (constraints.maxWidth - 56)
-                            .clamp(80.0, double.infinity)
-                            .toDouble(),
-                      ),
-                      child: Text(
-                        '${limits.groqRequestsThisMonth}/${limits.monthlyGroqRequestCap} Groq generation requests',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ),
-                  Chip(
-                    label: Text(
-                      '${limits.pendingDrafts}/${limits.maxPendingDrafts} pending',
-                    ),
-                  ),
-                  if (onCooldown)
-                    Chip(
-                      label: Text(
-                        'Ready in ${limits.cooldownRemainingMinutes} min',
-                      ),
-                    ),
-                  const Chip(label: Text('Auto-publish off')),
-                ],
-              ),
-              if (budgetEmpty) ...[
-                const SizedBox(height: AppSpacing.sm),
-                Text(
-                  queueFull
-                      ? 'Generation is paused because the review queue is full.'
-                      : onCooldown
-                      ? 'The last successful Verify generation is still on cooldown. Try again in about ${limits.cooldownRemainingMinutes} minute${limits.cooldownRemainingMinutes == 1 ? '' : 's'}.'
-                      : limits.groqRequestsRemaining <= 0
-                      ? 'The configured monthly Groq request budget has been used.'
-                      : limits.remainingThisMonth <= 0
-                      ? 'The configured monthly Verify draft budget has been used.'
-                      : 'The configured daily Verify draft budget has been used.',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.error,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
-              if (automation.successMessage != null) ...[
-                const SizedBox(height: AppSpacing.md),
-                Text(
-                  automation.successMessage!,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: AppColors.success,
-                  ),
-                ),
-              ],
-              if (automation.errorMessage != null) ...[
-                const SizedBox(height: AppSpacing.md),
-                Text(
-                  automation.errorMessage!,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.error,
-                  ),
-                ),
-              ],
-            ],
-          );
-
-          final settingsButton = OutlinedButton.icon(
-            onPressed: studio.isMutating || automation.isMutating
-                ? null
-                : () => _openSettings(context),
-            icon: const Icon(Icons.tune_rounded),
-            label: const Text('Automation settings'),
-          );
-          final generateButton = FilledButton.icon(
-            onPressed:
-                automation.isMutating ||
-                    studio.isMutating ||
-                    !limits.enabled ||
-                    budgetEmpty
-                ? null
-                : onGenerate,
-            icon: automation.isMutating
-                ? const SizedBox.square(
-                    dimension: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.auto_awesome_rounded),
-            label: Text(
-              automation.isMutating ? 'Checking...' : 'Find fresh case drafts',
-            ),
-          );
-
-          if (constraints.maxWidth < 760) {
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                copy,
-                const SizedBox(height: AppSpacing.lg),
-                settingsButton,
-                const SizedBox(height: AppSpacing.sm),
-                generateButton,
-              ],
-            );
-          }
-          return Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Expanded(child: copy),
-              const SizedBox(width: AppSpacing.xl),
-              SizedBox(
-                width: 230,
+              const SizedBox(width: AppSpacing.md),
+              Expanded(
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    settingsButton,
-                    const SizedBox(height: AppSpacing.sm),
-                    generateButton,
+                    Text(
+                      'Fresh AI drafts for Verify',
+                      style: theme.textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Choose a focus. Generate a draft. Review before publishing.',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
                   ],
                 ),
               ),
             ],
-          );
-        },
+          ),
+          const SizedBox(height: AppSpacing.lg),
+          StudioMetricRow(
+            children: [
+              StudioMetric(
+                value: '${limits.pendingDrafts}/${limits.maxPendingDrafts}',
+                label: 'Drafts in review',
+                icon: Icons.description_outlined,
+              ),
+              StudioMetric(
+                value: '${limits.remainingToday}',
+                label: 'Drafts left today',
+                icon: Icons.today_outlined,
+              ),
+              StudioMetric(
+                value: '${limits.remainingThisMonth}',
+                label: 'Drafts left this month',
+                icon: Icons.calendar_month_outlined,
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.lg),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              Chip(
+                avatar: Icon(
+                  limits.enabled ? Icons.schedule : Icons.pause_rounded,
+                  size: 16,
+                ),
+                label: Text(
+                  limits.enabled ? 'Schedule enabled' : 'Schedule paused',
+                ),
+              ),
+              const Chip(
+                avatar: Icon(Icons.lock_outline, size: 16),
+                label: Text('Review required'),
+              ),
+            ],
+          ),
+          if (budgetEmpty || !limits.enabled) ...[
+            const SizedBox(height: AppSpacing.md),
+            Text(
+              !limits.enabled
+                  ? 'Enable automation in settings to generate drafts.'
+                  : queueFull
+                  ? 'Review pending drafts to make room for more.'
+                  : onCooldown
+                  ? 'Next generation available in about $cooldown min. This wait applies to all verification skills.'
+                  : 'Your generation budget has been reached. Check limits in settings.',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+          if (automation.actionErrorMessage != null) ...[
+            const SizedBox(height: AppSpacing.md),
+            StudioNotice(
+              title: 'Generation could not complete',
+              message: automation.actionErrorMessage!,
+              isError: true,
+              onDismiss: automation.clearMessages,
+            ),
+          ],
+          if (automation.successMessage != null) ...[
+            const SizedBox(height: AppSpacing.md),
+            StudioNotice(
+              title: 'Generation result',
+              message: automation.successMessage!,
+              onDismiss: automation.clearMessages,
+            ),
+          ],
+          const SizedBox(height: AppSpacing.lg),
+          Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            children: [
+              FilledButton.icon(
+                onPressed: busy || !limits.enabled || budgetEmpty
+                    ? null
+                    : onGenerate,
+                icon: Icon(
+                  automation.isMutating
+                      ? Icons.hourglass_top_rounded
+                      : Icons.auto_awesome_outlined,
+                  size: 18,
+                ),
+                label: Text(
+                  automation.isMutating
+                      ? 'Generating...'
+                      : preparing
+                      ? 'Checking sources...'
+                      : onCooldown
+                      ? 'Ready in $cooldown min'
+                      : 'Generate drafts',
+                ),
+              ),
+              OutlinedButton.icon(
+                onPressed: busy ? null : () => _openSettings(context),
+                icon: const Icon(Icons.tune_rounded, size: 18),
+                label: const Text('Automation settings'),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.md),
+          ExpansionTile(
+            tilePadding: EdgeInsets.zero,
+            title: const Text('Limits & queue details'),
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Text(
+                  'Up to ${limits.maxArticlesPerRun} sources and ${limits.maxDraftsPerRun} drafts per run. Monthly AI requests: ${limits.groqRequestsThisMonth}/${limits.monthlyGroqRequestCap}. Topic choices apply to this run only.',
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -998,51 +1060,31 @@ class _StatusCard extends StatelessWidget {
   const _StatusCard({required this.controller});
 
   @override
-  Widget build(BuildContext context) {
-    return AppCard(
-      backgroundColor: Theme.of(context).colorScheme.surfaceContainerLow,
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          const status = Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Icon(Icons.fact_check_outlined),
-              SizedBox(width: AppSpacing.md),
-              Expanded(
-                child: Text(
-                  'Verification Studio is connected. Dynamic case drafts still require administrator approval before learners can receive them.',
-                ),
-              ),
-            ],
-          );
-          final refresh = OutlinedButton.icon(
-            onPressed: controller.isLoading ? null : controller.refresh,
-            icon: const Icon(Icons.refresh_rounded),
-            label: const Text('Refresh'),
-          );
-
-          if (constraints.maxWidth < AppBreakpoints.compact) {
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                status,
-                const SizedBox(height: AppSpacing.md),
-                refresh,
-              ],
-            );
-          }
-
-          return Row(
-            children: [
-              const Expanded(child: status),
-              const SizedBox(width: AppSpacing.lg),
-              refresh,
-            ],
-          );
-        },
-      ),
-    );
-  }
+  Widget build(BuildContext context) => AppCard(
+    padding: const EdgeInsets.all(AppSpacing.md),
+    child: Row(
+      children: [
+        Icon(
+          Icons.fact_check_outlined,
+          color: Theme.of(context).colorScheme.primary,
+        ),
+        const SizedBox(width: AppSpacing.sm),
+        Expanded(
+          child: Text(
+            controller.isLoading
+                ? 'Refreshing your workspace...'
+                : 'Your verification workspace',
+            style: Theme.of(context).textTheme.titleSmall,
+          ),
+        ),
+        IconButton(
+          tooltip: 'Refresh data',
+          onPressed: controller.isLoading ? null : controller.refresh,
+          icon: const Icon(Icons.refresh_rounded),
+        ),
+      ],
+    ),
+  );
 }
 
 class _HealthGrid extends StatelessWidget {

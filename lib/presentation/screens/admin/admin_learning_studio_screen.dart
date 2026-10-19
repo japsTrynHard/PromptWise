@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -11,6 +13,7 @@ import '../../widgets/app_card.dart';
 import '../../widgets/page_intro.dart';
 import '../../widgets/section_header.dart';
 import '../../widgets/state_message.dart';
+import '../../widgets/studio_generation_widgets.dart';
 
 class AdminLearningStudioScreen extends StatefulWidget {
   const AdminLearningStudioScreen({super.key});
@@ -20,9 +23,22 @@ class AdminLearningStudioScreen extends StatefulWidget {
       _AdminLearningStudioScreenState();
 }
 
-class _AdminLearningStudioScreenState
-    extends State<AdminLearningStudioScreen> {
+class _AdminLearningStudioScreenState extends State<AdminLearningStudioScreen> {
   bool _initialLoadRequested = false;
+  Timer? _cooldownTimer;
+  @override
+  void initState() {
+    super.initState();
+    _cooldownTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _cooldownTimer?.cancel();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -55,7 +71,7 @@ class _AdminLearningStudioScreenState
                 const PageIntro(
                   title: 'Learning Studio',
                   description:
-                      'Monitor learning depth, review AI-generated content, control trusted sources, and keep every automated update behind administrator approval.',
+                      'Create focused lessons, review drafts, and grow your learning library.',
                 ),
                 const SizedBox(height: AppSpacing.xl),
                 _buildStudioContent(context, controller),
@@ -71,7 +87,7 @@ class _AdminLearningStudioScreenState
     BuildContext context,
     ContentAutomationController controller,
   ) {
-    final errorMessage = controller.errorMessage;
+    final errorMessage = controller.loadErrorMessage;
     final successMessage = controller.successMessage;
 
     if (!controller.isAdministrator) {
@@ -88,11 +104,10 @@ class _AdminLearningStudioScreenState
         _buildStatusCard(controller),
         if (errorMessage != null) ...[
           const SizedBox(height: AppSpacing.lg),
-          StateMessage.error(
-            title: 'Some Learning Studio data could not load',
+          StudioNotice(
+            title: 'Some sections could not refresh',
             message: errorMessage,
-            actionLabel: 'Retry',
-            onAction: controller.refresh,
+            isError: true,
           ),
         ],
         if (successMessage != null) ...[
@@ -131,7 +146,7 @@ class _AdminLearningStudioScreenState
           const StateMessage.empty(
             title: 'No content-health data yet',
             message:
-                'The page is working, but no Phase 7 health rows were returned. Check the Phase 7 SQL/RLS setup and press Retry.',
+                'Content coverage is not available yet. Refresh your workspace to check again.',
           )
         else
           _HealthGrid(items: controller.health),
@@ -145,7 +160,7 @@ class _AdminLearningStudioScreenState
         if (controller.drafts.isEmpty)
           const AppCard(
             child: Text(
-              'No lesson drafts are waiting for review. Run a manual trusted-source check after the Edge Function is deployed.',
+              'Your review queue is clear. Choose a topic above to create new lesson drafts.',
             ),
           )
         else
@@ -174,17 +189,19 @@ class _AdminLearningStudioScreenState
             ),
           )
         else
-          ...controller.questionReviewQueue.take(20).map(
-            (question) => Padding(
-              padding: const EdgeInsets.only(bottom: AppSpacing.md),
-              child: _QuestionReviewCard(
-                question: question,
-                busy: controller.isMutating,
-                onReview: () => _reviewQuestion(context, question),
-                onReject: () => _rejectQuestion(context, question),
+          ...controller.questionReviewQueue
+              .take(20)
+              .map(
+                (question) => Padding(
+                  padding: const EdgeInsets.only(bottom: AppSpacing.md),
+                  child: _QuestionReviewCard(
+                    question: question,
+                    busy: controller.isMutating,
+                    onReview: () => _reviewQuestion(context, question),
+                    onReject: () => _rejectQuestion(context, question),
+                  ),
+                ),
               ),
-            ),
-          ),
         const SizedBox(height: AppSpacing.section),
         SectionHeader(
           title: 'Approved question bank',
@@ -203,7 +220,7 @@ class _AdminLearningStudioScreenState
         if (controller.sources.isEmpty)
           const AppCard(
             child: Text(
-              'No trusted sources were returned. The Learning Studio itself is available; verify the content_sources table and its administrator RLS policy.',
+              'No trusted sources are available yet. Refresh your workspace to check again.',
             ),
           )
         else
@@ -213,10 +230,8 @@ class _AdminLearningStudioScreenState
               child: _SourceCard(
                 key: ValueKey(source.id),
                 source: source,
-                onChanged: (value) => controller.setSourceEnabled(
-                  source.id,
-                  value,
-                ),
+                onChanged: (value) =>
+                    controller.setSourceEnabled(source.id, value),
               ),
             ),
           ),
@@ -226,96 +241,29 @@ class _AdminLearningStudioScreenState
   }
 
   Widget _buildStatusCard(ContentAutomationController controller) {
-    final theme = Theme.of(context);
-    final colors = theme.colorScheme;
-    final ready = controller.hasLoaded && controller.errorMessage == null;
-
     return AppCard(
-      padding: const EdgeInsets.all(AppSpacing.xl),
-      backgroundColor: ready
-          ? AppColors.success.withValues(alpha: 0.07)
-          : colors.surfaceContainerHighest.withValues(alpha: 0.45),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final status = Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                width: 44,
-                height: 44,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: ready
-                      ? AppColors.success.withValues(alpha: 0.14)
-                      : colors.primaryContainer,
-                  borderRadius: BorderRadius.circular(AppRadius.md),
-                ),
-                child: Icon(
-                  controller.isLoading
-                      ? Icons.sync_rounded
-                      : ready
-                          ? Icons.cloud_done_outlined
-                          : Icons.cloud_sync_outlined,
-                  color: ready ? AppColors.success : colors.primary,
-                ),
-              ),
-              const SizedBox(width: AppSpacing.md),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      controller.isLoading
-                          ? 'Loading Learning Studio data…'
-                          : ready
-                              ? 'Learning Studio connected'
-                              : 'Learning Studio is available',
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                    const SizedBox(height: AppSpacing.xs),
-                    Text(
-                      controller.isLoading
-                          ? 'PromptWise is reading the Phase 7 tables from Supabase.'
-                          : ready
-                              ? 'The Phase 7 administrator data loaded successfully.'
-                              : 'If an online section fails, it will show its error here instead of leaving this page blank.',
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: colors.onSurfaceVariant,
-                        height: 1.45,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          );
-
-          final refresh = OutlinedButton.icon(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      child: Row(
+        children: [
+          Icon(
+            controller.isLoading ? Icons.sync_rounded : Icons.school_outlined,
+            color: Theme.of(context).colorScheme.primary,
+          ),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(
+            child: Text(
+              controller.isLoading
+                  ? 'Refreshing your workspace...'
+                  : 'Your learning workspace',
+              style: Theme.of(context).textTheme.titleSmall,
+            ),
+          ),
+          IconButton(
+            tooltip: 'Refresh data',
             onPressed: controller.isLoading ? null : controller.refresh,
             icon: const Icon(Icons.refresh_rounded),
-            label: const Text('Refresh data'),
-          );
-
-          if (constraints.maxWidth < 650) {
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                status,
-                const SizedBox(height: AppSpacing.md),
-                refresh,
-              ],
-            );
-          }
-          return Row(
-            children: [
-              Expanded(child: status),
-              const SizedBox(width: AppSpacing.lg),
-              refresh,
-            ],
-          );
-        },
+          ),
+        ],
       ),
     );
   }
@@ -383,7 +331,9 @@ class _AdminLearningStudioScreenState
       ),
     );
     if (!context.mounted || confirmed != true) return;
-    await context.read<ContentAutomationController>().rejectQuestion(question.id);
+    await context.read<ContentAutomationController>().rejectQuestion(
+      question.id,
+    );
   }
 
   Future<void> _confirmReject(
@@ -421,167 +371,174 @@ class _AutomationCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final settings = controller.settings;
     final queue = controller.queueHealth;
+    final cooldown = settings.cooldownRemainingMinutes;
+    final queueFull =
+        queue.pendingDrafts >= queue.maxPendingDrafts ||
+        queue.pendingQuestions >= queue.maxPendingQuestions;
+    final busy = controller.isMutating || controller.isLoading;
     return AppCard(
-      padding: EdgeInsets.all(
-        AdaptiveLayout.isPhone(context) ? AppSpacing.lg : AppSpacing.xxl,
-      ),
-      backgroundColor: Theme.of(context).colorScheme.primaryContainer.withValues(
-            alpha: Theme.of(context).brightness == Brightness.dark ? 0.18 : 0.4,
-          ),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final compact = constraints.maxWidth < AppBreakpoints.compact;
-          final info = Column(
+      padding: const EdgeInsets.all(AppSpacing.lg),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Icon(
-                    Icons.auto_awesome_outlined,
-                    color: Theme.of(context).colorScheme.primary,
-                  ),
-                  const SizedBox(width: AppSpacing.sm),
-                  Expanded(
-                    child: Text(
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.primaryContainer,
+                  borderRadius: BorderRadius.circular(AppRadius.md),
+                ),
+                child: Icon(
+                  Icons.auto_awesome_outlined,
+                  color: theme.colorScheme.primary,
+                ),
+              ),
+              const SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
                       'Continuous content automation',
-                      style: (compact
-                              ? Theme.of(context).textTheme.titleMedium
-                              : Theme.of(context).textTheme.titleLarge)
-                          ?.copyWith(fontWeight: FontWeight.w800),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: AppSpacing.sm),
-              Text(
-                settings.enabled
-                    ? 'Enabled. PromptWise can discover relevant AI-literacy updates from trusted sources and save structured drafts for review.'
-                    : 'Disabled. Existing learning content continues to work, but no automated discovery runs should create drafts.',
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      height: 1.5,
-                    ),
-              ),
-              const SizedBox(height: AppSpacing.md),
-              Wrap(
-                spacing: AppSpacing.sm,
-                runSpacing: AppSpacing.sm,
-                children: [
-                  Chip(
-                    label: Text(
-                      'Max ${settings.maxArticlesPerRun} articles/run',
-                    ),
-                  ),
-                  Chip(
-                    label: Text('Max ${settings.maxDraftsPerDay} drafts/day'),
-                  ),
-                  Chip(
-                    label: Text('${settings.monthlyDraftCap} drafts/month cap'),
-                  ),
-                  ...settings.focusTopics.map(
-                    (topic) => Chip(label: Text('Focus: ${topic.label}')),
-                  ),
-
-                  Chip(
-                    avatar: const Icon(Icons.inventory_2_outlined, size: 16),
-                    label: Text(
-                      'Draft queue ${queue.pendingDrafts}/${queue.maxPendingDrafts}',
-                    ),
-                  ),
-                  Chip(
-                    avatar: const Icon(Icons.fact_check_outlined, size: 16),
-                    label: Text(
-                      'Question queue ${queue.pendingQuestions}/${queue.maxPendingQuestions}',
-                    ),
-                  ),
-                  const Chip(label: Text('Auto-publish OFF')),
-                ],
-              ),
-              if (settings.focusTopics.isEmpty) ...[
-                const SizedBox(height: AppSpacing.sm),
-                const Text(
-                  'No scheduled focus areas selected. Scheduled lesson generation is paused until an admin saves at least one focus area.',
-                ),
-              ],
-              const SizedBox(height: AppSpacing.sm),
-              Text(
-                'Queue protection: untouched AI drafts/questions auto-archive after ${queue.draftArchiveDays} days; rejected items are removed after ${queue.rejectedDeleteDays} days; archived pending AI content is removed after ${queue.archivedDeleteDays} days.',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      height: 1.45,
-                    ),
-              ),
-              if (queue.expiringDraftsSoon > 0 ||
-                  queue.expiringQuestionsSoon > 0) ...[
-                const SizedBox(height: AppSpacing.sm),
-                Text(
-                  '${queue.expiringDraftsSoon} lesson draft${queue.expiringDraftsSoon == 1 ? '' : 's'} and ${queue.expiringQuestionsSoon} question${queue.expiringQuestionsSoon == 1 ? '' : 's'} will auto-archive within about 5 days unless reviewed.',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        fontWeight: FontWeight.w600,
+                      style: theme.textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w800,
                       ),
-                ),
-              ],
-            ],
-          );
-
-          final runAction = FilledButton.icon(
-            onPressed: controller.isMutating || !settings.enabled
-                ? null
-                : () => _openManualFocusDialog(context),
-            icon: controller.isMutating
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: Colors.white,
                     ),
-                  )
-                : const Icon(Icons.refresh_rounded),
-            label: Text(
-              controller.isMutating ? 'Generating...' : 'Generate now (choose focus)',
-            ),
-          );
-          final settingsAction = OutlinedButton.icon(
-            onPressed: controller.isMutating
-                ? null
-                : () => _openAutomationSettings(context),
-            icon: const Icon(Icons.tune_rounded),
-            label: const Text('Automation settings'),
-          );
-
-          if (constraints.maxWidth >= 720) {
-            return Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Expanded(child: info),
-                const SizedBox(width: AppSpacing.xxl),
-                SizedBox(
-                  width: 240,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      settingsAction,
-                      const SizedBox(height: AppSpacing.sm),
-                      runAction,
-                    ],
-                  ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Choose a focus. Generate a draft. Review before publishing.',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
                 ),
-              ],
-            );
-          }
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              info,
-              const SizedBox(height: AppSpacing.xl),
-              settingsAction,
-              const SizedBox(height: AppSpacing.sm),
-              runAction,
+              ),
             ],
-          );
-        },
+          ),
+          const SizedBox(height: AppSpacing.lg),
+          StudioMetricRow(
+            children: [
+              StudioMetric(
+                value: '${queue.pendingDrafts}/${queue.maxPendingDrafts}',
+                label: 'Drafts in review',
+                icon: Icons.description_outlined,
+              ),
+              StudioMetric(
+                value: '${settings.maxDraftsPerDay}',
+                label: 'Daily draft limit',
+                icon: Icons.today_outlined,
+              ),
+              StudioMetric(
+                value: '${settings.monthlyDraftCap}',
+                label: 'Monthly draft limit',
+                icon: Icons.calendar_month_outlined,
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.lg),
+          Text(
+            'SCHEDULED FOCUS',
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+              letterSpacing: 1,
+            ),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              Chip(
+                avatar: Icon(
+                  settings.enabled ? Icons.schedule : Icons.pause_rounded,
+                  size: 16,
+                ),
+                label: Text(
+                  settings.enabled ? 'Schedule enabled' : 'Schedule paused',
+                ),
+              ),
+              ...settings.focusTopics.map(
+                (topic) => Chip(label: Text(topic.label)),
+              ),
+              const Chip(
+                avatar: Icon(Icons.lock_outline, size: 16),
+                label: Text('Review required'),
+              ),
+            ],
+          ),
+          if (controller.actionErrorMessage != null) ...[
+            const SizedBox(height: AppSpacing.md),
+            StudioNotice(
+              title: 'Generation could not complete',
+              message: controller.actionErrorMessage!,
+              isError: true,
+              onDismiss: controller.clearMessages,
+            ),
+          ],
+          if (cooldown > 0 || queueFull || !settings.enabled) ...[
+            const SizedBox(height: AppSpacing.md),
+            Text(
+              queueFull
+                  ? 'Review pending drafts or questions to make room for more.'
+                  : !settings.enabled
+                  ? 'Enable automation in settings to generate drafts.'
+                  : 'Next generation available in about $cooldown min. This wait applies to all learning topics.',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+          const SizedBox(height: AppSpacing.lg),
+          Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            children: [
+              FilledButton.icon(
+                onPressed:
+                    busy || !settings.enabled || cooldown > 0 || queueFull
+                    ? null
+                    : () => _openManualFocusDialog(context),
+                icon: Icon(
+                  controller.isMutating
+                      ? Icons.hourglass_top_rounded
+                      : Icons.auto_awesome_outlined,
+                  size: 18,
+                ),
+                label: Text(
+                  controller.isMutating
+                      ? 'Generating...'
+                      : cooldown > 0
+                      ? 'Ready in $cooldown min'
+                      : 'Generate drafts',
+                ),
+              ),
+              OutlinedButton.icon(
+                onPressed: busy ? null : () => _openAutomationSettings(context),
+                icon: const Icon(Icons.tune_rounded, size: 18),
+                label: const Text('Automation settings'),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.md),
+          ExpansionTile(
+            tilePadding: EdgeInsets.zero,
+            title: const Text('Limits & queue details'),
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Text(
+                  'Up to ${settings.maxArticlesPerRun} sources per run. Question queue: ${queue.pendingQuestions}/${queue.maxPendingQuestions}. Pending drafts archive after ${queue.draftArchiveDays} days. Manual focus choices never change your saved schedule.',
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -589,8 +546,29 @@ class _AutomationCard extends StatelessWidget {
   Future<void> _openManualFocusDialog(BuildContext context) async {
     final chosen = await showDialog<List<LearningTopic>>(
       context: context,
-      builder: (dialogContext) => _ManualFocusDialog(
+      builder: (dialogContext) => StudioFocusDialog<LearningTopic>(
+        title: 'Create lesson drafts',
+        description:
+            'Choose topics for this run only. Your saved scheduled focus areas will not change.',
         initial: controller.settings.focusTopics,
+        options: LearningTopic.values
+            .map(
+              (topic) => StudioFocusOption(
+                topic,
+                topic.label,
+                topic.shortDescription,
+                switch (topic) {
+                  LearningTopic.promptClarity =>
+                    Icons.chat_bubble_outline_rounded,
+                  LearningTopic.context => Icons.layers_outlined,
+                  LearningTopic.specificity =>
+                    Icons.center_focus_strong_outlined,
+                  LearningTopic.responsibleUse => Icons.shield_outlined,
+                  LearningTopic.verification => Icons.fact_check_outlined,
+                },
+              ),
+            )
+            .toList(),
       ),
     );
     if (chosen == null || !context.mounted) return;
@@ -615,77 +593,6 @@ class _AutomationCard extends StatelessWidget {
       focusTopics: result.focusTopics,
     );
   }
-}
-
-class _ManualFocusDialog extends StatefulWidget {
-  final List<LearningTopic> initial;
-
-  const _ManualFocusDialog({required this.initial});
-
-  @override
-  State<_ManualFocusDialog> createState() => _ManualFocusDialogState();
-}
-
-class _ManualFocusDialogState extends State<_ManualFocusDialog> {
-  late Set<LearningTopic> selected;
-
-  @override
-  void initState() {
-    super.initState();
-    selected = widget.initial.toSet();
-  }
-
-  @override
-  Widget build(BuildContext context) => AlertDialog(
-        title: const Text('Generate content by focus area'),
-        content: SizedBox(
-          width: 450,
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                const Text(
-                  'Choose topics for this run only. Your saved scheduled focus areas will not change.',
-                ),
-                const SizedBox(height: AppSpacing.md),
-                ...LearningTopic.values.map((topic) => CheckboxListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: Text(topic.label),
-                      subtitle: Text(topic.shortDescription),
-                      value: selected.contains(topic),
-                      onChanged: (checked) => setState(() {
-                        if (checked == true) {
-                          selected.add(topic);
-                        } else {
-                          selected.remove(topic);
-                        }
-                      }),
-                    )),
-                if (selected.isEmpty)
-                  const Text('Select at least one focus area.'),
-              ],
-            ),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: selected.isEmpty
-                ? null
-                : () => Navigator.pop(
-                      context,
-                      LearningTopic.values
-                          .where(selected.contains)
-                          .toList(growable: false),
-                    ),
-            child: const Text('Generate drafts'),
-          ),
-        ],
-      );
 }
 
 class _AutomationSettingsValue {
@@ -720,8 +627,7 @@ class _AutomationSettingsDialog extends StatefulWidget {
       _AutomationSettingsDialogState();
 }
 
-class _AutomationSettingsDialogState
-    extends State<_AutomationSettingsDialog> {
+class _AutomationSettingsDialogState extends State<_AutomationSettingsDialog> {
   final _formKey = GlobalKey<FormState>();
   late bool _enabled;
   late Set<LearningTopic> _focusTopics;
@@ -799,24 +705,28 @@ class _AutomationSettingsDialogState
                 const Text(
                   'Select topics for scheduled AI generation. Select at least one before enabling automation.',
                 ),
-                ...LearningTopic.values.map((topic) => CheckboxListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: Text(topic.label),
-                      subtitle: Text(topic.shortDescription),
-                      value: _focusTopics.contains(topic),
-                      onChanged: (checked) => setState(() {
-                        if (checked == true) {
-                          _focusTopics.add(topic);
-                        } else {
-                          _focusTopics.remove(topic);
-                        }
-                        _showFocusError = false;
-                      }),
-                    )),
+                ...LearningTopic.values.map(
+                  (topic) => CheckboxListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: Text(topic.label),
+                    subtitle: Text(topic.shortDescription),
+                    value: _focusTopics.contains(topic),
+                    onChanged: (checked) => setState(() {
+                      if (checked == true) {
+                        _focusTopics.add(topic);
+                      } else {
+                        _focusTopics.remove(topic);
+                      }
+                      _showFocusError = false;
+                    }),
+                  ),
+                ),
                 if (_showFocusError)
                   Text(
                     'Select at least one scheduled focus area.',
-                    style: TextStyle(color: Theme.of(context).colorScheme.error),
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.error,
+                    ),
                   ),
                 const SizedBox(height: AppSpacing.md),
                 TextFormField(
@@ -854,7 +764,8 @@ class _AutomationSettingsDialogState
                   keyboardType: TextInputType.number,
                   decoration: const InputDecoration(
                     labelText: 'Maximum pending AI lesson drafts',
-                    helperText: 'Automation pauses when this queue is full. Range: 5–200',
+                    helperText:
+                        'Automation pauses when this queue is full. Range: 5–200',
                   ),
                   validator: (value) => _validateInt(value, 5, 200),
                 ),
@@ -864,7 +775,8 @@ class _AutomationSettingsDialogState
                   keyboardType: TextInputType.number,
                   decoration: const InputDecoration(
                     labelText: 'Maximum pending AI questions',
-                    helperText: 'Prevents the review queue from growing without limit. Range: 20–1000',
+                    helperText:
+                        'Prevents the review queue from growing without limit. Range: 20–1000',
                   ),
                   validator: (value) => _validateInt(value, 20, 1000),
                 ),
@@ -893,10 +805,7 @@ class _AutomationSettingsDialogState
           onPressed: () => Navigator.pop(context),
           child: const Text('Cancel'),
         ),
-        FilledButton(
-          onPressed: _save,
-          child: const Text('Save settings'),
-        ),
+        FilledButton(onPressed: _save, child: const Text('Save settings')),
       ],
     );
   }
@@ -946,8 +855,8 @@ class _HealthGrid extends StatelessWidget {
         final columns = constraints.maxWidth >= 1080
             ? 3
             : constraints.maxWidth >= 700
-                ? 2
-                : 1;
+            ? 2
+            : 1;
         if (columns == 1) {
           return Column(
             children: [
@@ -990,14 +899,16 @@ class _HealthCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(item.topic.label,
-              style: Theme.of(context).textTheme.titleMedium),
+          Text(
+            item.topic.label,
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
           const SizedBox(height: AppSpacing.sm),
           Text(
             '${item.lessons} lessons · ${item.objectives} objectives · ${item.publishedQuestions} published questions',
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
           ),
           const SizedBox(height: AppSpacing.md),
           Wrap(
@@ -1046,15 +957,16 @@ class _DraftCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(draft.title,
-                        style: Theme.of(context).textTheme.titleLarge),
+                    Text(
+                      draft.title,
+                      style: Theme.of(context).textTheme.titleLarge,
+                    ),
                     const SizedBox(height: AppSpacing.xs),
                     Text(
                       '${draft.topic.label} · ${LearningRankX.fromLevel(draft.targetLevel).label} · ${draft.sourceName}',
                       style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                            color:
-                                Theme.of(context).colorScheme.onSurfaceVariant,
-                          ),
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
                     ),
                   ],
                 ),
@@ -1065,7 +977,9 @@ class _DraftCard extends StatelessWidget {
           const SizedBox(height: AppSpacing.md),
           Text(
             draft.summary,
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(height: 1.5),
+            style: Theme.of(
+              context,
+            ).textTheme.bodyMedium?.copyWith(height: 1.5),
           ),
           const SizedBox(height: AppSpacing.md),
           Wrap(
@@ -1125,9 +1039,7 @@ class _QuestionReviewCard extends StatelessWidget {
             children: [
               Chip(label: Text(question.topic.label)),
               Chip(
-                label: Text(
-                  LearningRankX.fromLevel(question.difficulty).label,
-                ),
+                label: Text(LearningRankX.fromLevel(question.difficulty).label),
               ),
               Chip(label: Text(question.questionType.replaceAll('_', ' '))),
               if (question.generatedBy != 'manual')
@@ -1135,16 +1047,13 @@ class _QuestionReviewCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: AppSpacing.md),
-          Text(
-            question.stem,
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
+          Text(question.stem, style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: AppSpacing.sm),
           Text(
             'Answer key and explanation must be checked by a human before this question can enter the adaptive bank.',
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
           ),
           const SizedBox(height: AppSpacing.md),
           Wrap(
@@ -1202,12 +1111,13 @@ class _QuestionReviewDialogState extends State<_QuestionReviewDialog> {
     _explanation = TextEditingController(text: widget.question.explanation);
     _correctIndex = widget.question.correctIndex.clamp(0, 3);
     _difficulty = widget.question.difficulty.clamp(1, 5);
-    _questionType = const [
-      'concept',
-      'scenario',
-      'best_response',
-      'evaluation',
-    ].contains(widget.question.questionType)
+    _questionType =
+        const [
+          'concept',
+          'scenario',
+          'best_response',
+          'evaluation',
+        ].contains(widget.question.questionType)
         ? widget.question.questionType
         : 'scenario';
   }
@@ -1376,8 +1286,8 @@ class _QuestionReviewDialogState extends State<_QuestionReviewDialog> {
                                   ),
                                   validator: (value) =>
                                       (value?.trim().isEmpty ?? true)
-                                          ? 'Enter an answer option.'
-                                          : null,
+                                      ? 'Enter an answer option.'
+                                      : null,
                                 ),
                               ),
                               if (index != 3)
@@ -1433,11 +1343,15 @@ class _QuestionReviewDialogState extends State<_QuestionReviewDialog> {
   void _save() {
     final form = _formKey.currentState;
     if (form == null || !form.validate()) return;
-    final options = _options.map((controller) => controller.text.trim()).toList();
+    final options = _options
+        .map((controller) => controller.text.trim())
+        .toList();
     final normalized = options.map((value) => value.toLowerCase()).toSet();
     if (normalized.length != 4) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('All four answer options must be different.')),
+        const SnackBar(
+          content: Text('All four answer options must be different.'),
+        ),
       );
       return;
     }
@@ -1482,15 +1396,19 @@ class _ApprovedQuestionBankBrowserState
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final query = _searchController.text.trim().toLowerCase();
-    final filtered = widget.items.where((item) {
-      if (_topic != null && item.topic != _topic) return false;
-      if (_difficulty != null && item.difficulty != _difficulty) return false;
-      if (query.isEmpty) return true;
-      return item.stem.toLowerCase().contains(query) ||
-          item.questionCode.toLowerCase().contains(query) ||
-          item.topic.label.toLowerCase().contains(query) ||
-          item.generatedBy.toLowerCase().contains(query);
-    }).toList(growable: false);
+    final filtered = widget.items
+        .where((item) {
+          if (_topic != null && item.topic != _topic) return false;
+          if (_difficulty != null && item.difficulty != _difficulty) {
+            return false;
+          }
+          if (query.isEmpty) return true;
+          return item.stem.toLowerCase().contains(query) ||
+              item.questionCode.toLowerCase().contains(query) ||
+              item.topic.label.toLowerCase().contains(query) ||
+              item.generatedBy.toLowerCase().contains(query);
+        })
+        .toList(growable: false);
 
     final visible = filtered.take(40).toList(growable: false);
 
@@ -1559,13 +1477,10 @@ class _ApprovedQuestionBankBrowserState
                     for (var level = 1; level <= 5; level++)
                       DropdownMenuItem<int?>(
                         value: level,
-                        child: Text(
-                          QuestionDifficultyX.fromLevel(level).label,
-                        ),
+                        child: Text(QuestionDifficultyX.fromLevel(level).label),
                       ),
                   ],
-                  onChanged: (value) =>
-                      setState(() => _difficulty = value),
+                  onChanged: (value) => setState(() => _difficulty = value),
                 ),
               ),
               FilterChip(
@@ -1577,8 +1492,7 @@ class _ApprovedQuestionBankBrowserState
                   size: 18,
                 ),
                 label: const Text('Show answer keys'),
-                onSelected: (value) =>
-                    setState(() => _showAnswerKeys = value),
+                onSelected: (value) => setState(() => _showAnswerKeys = value),
               ),
             ],
           ),
@@ -1627,8 +1541,8 @@ class _ApprovedQuestionCard extends StatelessWidget {
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
     final level = QuestionDifficultyX.fromLevel(item.difficulty).label;
-    final answer = item.correctIndex >= 0 &&
-            item.correctIndex < item.options.length
+    final answer =
+        item.correctIndex >= 0 && item.correctIndex < item.options.length
         ? item.options[item.correctIndex]
         : 'Answer key unavailable';
 
@@ -1653,8 +1567,8 @@ class _ApprovedQuestionCard extends StatelessWidget {
                 label: item.generatedBy.startsWith('phase7_')
                     ? 'PromptWise curated'
                     : item.generatedBy == 'manual'
-                        ? 'Manual'
-                        : 'AI-assisted',
+                    ? 'Manual'
+                    : 'AI-assisted',
               ),
               _QuestionMetaPill(
                 label: item.status == 'published' ? 'Published' : 'Verified',
@@ -1728,10 +1642,7 @@ class _QuestionMetaPill extends StatelessWidget {
         color: theme.colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(999),
       ),
-      child: Text(
-        label,
-        style: theme.textTheme.labelSmall,
-      ),
+      child: Text(label, style: theme.textTheme.labelSmall),
     );
   }
 }
@@ -1740,11 +1651,7 @@ class _SourceCard extends StatefulWidget {
   final ContentSource source;
   final Future<bool> Function(bool enabled) onChanged;
 
-  const _SourceCard({
-    super.key,
-    required this.source,
-    required this.onChanged,
-  });
+  const _SourceCard({super.key, required this.source, required this.onChanged});
 
   @override
   State<_SourceCard> createState() => _SourceCardState();
@@ -1802,10 +1709,7 @@ class _SourceCardState extends State<_SourceCard> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  widget.source.name,
-                  style: theme.textTheme.titleMedium,
-                ),
+                Text(widget.source.name, style: theme.textTheme.titleMedium),
                 const SizedBox(height: AppSpacing.xs),
                 Text(
                   'Trust ${widget.source.trustLevel}/5 · ${widget.source.sourceType.toUpperCase()}',
@@ -1829,17 +1733,10 @@ class _SourceCardState extends State<_SourceCard> {
                       color: theme.colorScheme.primary,
                     ),
                   )
-                : const SizedBox(
-                    key: ValueKey('idle'),
-                    width: 18,
-                    height: 18,
-                  ),
+                : const SizedBox(key: ValueKey('idle'), width: 18, height: 18),
           ),
           const SizedBox(width: AppSpacing.sm),
-          Switch(
-            value: _enabled,
-            onChanged: _saving ? null : _toggle,
-          ),
+          Switch(value: _enabled, onChanged: _saving ? null : _toggle),
         ],
       ),
     );

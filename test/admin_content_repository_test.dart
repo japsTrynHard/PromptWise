@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:promptwise/data/models/learning_topic.dart';
+import 'package:promptwise/data/models/verification.dart';
 import 'package:promptwise/data/repositories/content_automation_repository.dart';
 import 'package:promptwise/data/repositories/content_repository.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -35,6 +36,32 @@ void main() {
     status,
     headers: {'content-type': 'application/json'},
   );
+
+  for (final topic in LearningTopic.values) {
+    test('manual selection forwards only ${topic.id}', () async {
+      final client = clientFor((request) async {
+        expect(jsonDecode(request.body)['focus_topics'], [topic.id]);
+        return jsonResponse({'message': 'Draft queued.'}, 200);
+      });
+      await ContentAutomationRepository(client).runAutomationNow([topic]);
+    });
+  }
+
+  for (final skill in VerificationSubskill.values) {
+    test('Verify selection forwards only ${skill.id}', () async {
+      final client = clientFor((request) async {
+        expect(jsonDecode(request.body), {
+          'mode': 'manual',
+          'target': 'verification',
+          'focus_skills': [skill.id],
+        });
+        return jsonResponse({'message': 'Draft queued.'}, 200);
+      });
+      await ContentAutomationRepository(
+        client,
+      ).runVerificationDraftsNow(focusSkills: [skill]);
+    });
+  }
 
   test(
     'manual generation sends the selected topics and returns the server result',

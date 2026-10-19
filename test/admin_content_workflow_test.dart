@@ -303,6 +303,8 @@ void main() {
       expect(repo.requestedTopics, [LearningTopic.context]);
       expect(automation.drafts.single.id, 'generated-1');
       expect(automation.errorMessage, contains('Partial run'));
+      expect(automation.actionErrorMessage, contains('Partial run'));
+      expect(automation.loadErrorMessage, isNull);
       expect(automation.successMessage, isNull);
       expect(automation.isMutating, isFalse);
     },

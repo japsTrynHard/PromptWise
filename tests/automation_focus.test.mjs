@@ -3,9 +3,26 @@ import assert from 'node:assert/strict';
 import {
   FOCUS_TOPICS, validateFocusTopics, resolveFocusTopics, textSupportsFocus,
   selectCandidateFocus, enforceDraftFocus,
+  VERIFICATION_FOCUS_SKILLS, validateVerificationFocus, enforceVerificationFocus,
 } from '../supabase/functions/content-automation/focus.mjs';
 
 const saved = ['context', 'responsible_use'];
+
+for (const skill of VERIFICATION_FOCUS_SKILLS) {
+  test(`Verify focus validates and enforces ${skill}`, () => {
+    assert.deepEqual(validateVerificationFocus([skill]), [skill]);
+    assert.doesNotThrow(() => enforceVerificationFocus({subskill: skill}, skill));
+    assert.throws(() => enforceVerificationFocus({subskill: 'unrelated'}, skill));
+  });
+}
+
+test('Verify focus rejects empty, unknown, repeated and malformed selections', () => {
+  for (const value of [[], null, 'claim_verification', ['unknown'],
+    ['claim_verification', 'claim_verification'], [null]]) {
+    assert.throws(() => validateVerificationFocus(value));
+  }
+  assert.doesNotThrow(() => enforceVerificationFocus({subskill: 'claim_verification'}, undefined));
+});
 const candidate = (title, summary = '') => ({ title, summary, topicHint: 'verification' });
 
 for (const focusTopic of FOCUS_TOPICS) {

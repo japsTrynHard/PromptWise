@@ -5,6 +5,27 @@ export const FOCUS_TOPICS = Object.freeze([
 ]);
 const VALID_TOPICS = new Set(FOCUS_TOPICS);
 
+export const VERIFICATION_FOCUS_SKILLS = Object.freeze([
+  'source_verification', 'claim_verification', 'media_provenance',
+  'manipulation_detection', 'citation_verification', 'uncertainty_judgment',
+]);
+
+export function validateVerificationFocus(value) {
+  if (!Array.isArray(value) || value.length === 0 ||
+      value.length > VERIFICATION_FOCUS_SKILLS.length ||
+      value.some((skill) => !VERIFICATION_FOCUS_SKILLS.includes(skill)) ||
+      new Set(value).size !== value.length) {
+    throw new Error('Choose one or more distinct valid verification skills.');
+  }
+  return [...value];
+}
+
+export function enforceVerificationFocus(draft, focusSkill) {
+  if (focusSkill != null && draft?.subskill !== focusSkill) {
+    throw new Error(`Generated case does not match the selected verification skill: ${focusSkill}.`);
+  }
+}
+
 export function validateFocusTopics(value) {
   if (!Array.isArray(value) || value.length < 1 || value.length > FOCUS_TOPICS.length ||
       value.some((topic) => typeof topic !== 'string' || !VALID_TOPICS.has(topic)) ||
