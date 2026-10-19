@@ -208,11 +208,7 @@ class ContentAutomationRepository {
   Future<List<QuestionBankReviewItem>> fetchApprovedQuestions() async {
     final response = await _client
         .from('question_bank')
-        .select(
-          'id, question_code, source_content_id, topic_id, question_type, '
-          'stem, options, correct_index, explanation, difficulty, status, '
-          'validation_status, quality_score, generated_by, source_url, created_at',
-        )
+        .select()
         .eq('validation_status', 'verified')
         .neq('status', 'archived')
         .order('created_at', ascending: false)

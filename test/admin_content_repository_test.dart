@@ -37,6 +37,45 @@ void main() {
     headers: {'content-type': 'application/json'},
   );
 
+  test(
+    'approved bank reads approval metadata without requiring a new column on older servers',
+    () async {
+      final approvedAt = DateTime.utc(2026, 10, 19, 10, 20);
+      final client = clientFor((request) async {
+        expect(request.url.queryParameters['select'], '*');
+        expect(request.url.queryParameters['validation_status'], 'eq.verified');
+        return jsonResponse([
+          {
+            'id': 'q1',
+            'topic_id': 'context',
+            'approved_at': approvedAt.toIso8601String(),
+          },
+          {
+            'id': 'q2',
+            'topic_id': 'context',
+            'created_at': '2020-01-01T00:00:00Z',
+          },
+        ], 200);
+      });
+      final rows = await ContentAutomationRepository(
+        client,
+      ).fetchApprovedQuestions();
+      expect(rows.first.approvedAt, approvedAt);
+      expect(
+        rows.first.copyWith(stem: 'Edited question').approvedAt,
+        approvedAt,
+      );
+      expect(rows.last.approvedAt, isNull);
+      final legacyCase = VerificationCase.fromMap({
+        'id': 'c1',
+        'subskill': 'claim_verification',
+        'correct_decision': 'supported',
+        'created_at': '2020-01-01T00:00:00Z',
+      });
+      expect(legacyCase.approvedAt, isNull);
+    },
+  );
+
   for (final topic in LearningTopic.values) {
     test('manual selection forwards only ${topic.id}', () async {
       final client = clientFor((request) async {

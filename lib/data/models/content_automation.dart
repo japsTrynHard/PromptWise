@@ -356,6 +356,7 @@ class QuestionBankReviewItem {
   final String generatedBy;
   final String? sourceUrl;
   final DateTime? createdAt;
+  final DateTime? approvedAt;
 
   const QuestionBankReviewItem({
     required this.id,
@@ -374,6 +375,7 @@ class QuestionBankReviewItem {
     required this.generatedBy,
     required this.sourceUrl,
     this.createdAt,
+    this.approvedAt,
   });
 
   factory QuestionBankReviewItem.fromMap(Map<String, dynamic> map) {
@@ -402,6 +404,7 @@ class QuestionBankReviewItem {
       generatedBy: map['generated_by']?.toString() ?? 'manual',
       sourceUrl: _nullableString(map['source_url']),
       createdAt: _asDate(map['created_at']),
+      approvedAt: _asDate(map['approved_at']),
     );
   }
 
@@ -430,6 +433,7 @@ class QuestionBankReviewItem {
       generatedBy: generatedBy,
       sourceUrl: sourceUrl,
       createdAt: createdAt,
+      approvedAt: approvedAt,
     );
   }
 }

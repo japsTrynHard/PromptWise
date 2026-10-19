@@ -11,61 +11,60 @@ enum VerificationSubskill {
 
 extension VerificationSubskillX on VerificationSubskill {
   String get id => switch (this) {
-        VerificationSubskill.sourceVerification => 'source_verification',
-        VerificationSubskill.claimVerification => 'claim_verification',
-        VerificationSubskill.mediaProvenance => 'media_provenance',
-        VerificationSubskill.manipulationDetection => 'manipulation_detection',
-        VerificationSubskill.citationVerification => 'citation_verification',
-        VerificationSubskill.uncertaintyJudgment => 'uncertainty_judgment',
-      };
+    VerificationSubskill.sourceVerification => 'source_verification',
+    VerificationSubskill.claimVerification => 'claim_verification',
+    VerificationSubskill.mediaProvenance => 'media_provenance',
+    VerificationSubskill.manipulationDetection => 'manipulation_detection',
+    VerificationSubskill.citationVerification => 'citation_verification',
+    VerificationSubskill.uncertaintyJudgment => 'uncertainty_judgment',
+  };
 
   String get label => switch (this) {
-        VerificationSubskill.sourceVerification => 'Source verification',
-        VerificationSubskill.claimVerification => 'Claim verification',
-        VerificationSubskill.mediaProvenance => 'Media provenance',
-        VerificationSubskill.manipulationDetection => 'Manipulation detection',
-        VerificationSubskill.citationVerification => 'Citation verification',
-        VerificationSubskill.uncertaintyJudgment => 'Uncertainty judgment',
-      };
-
+    VerificationSubskill.sourceVerification => 'Source verification',
+    VerificationSubskill.claimVerification => 'Claim verification',
+    VerificationSubskill.mediaProvenance => 'Media provenance',
+    VerificationSubskill.manipulationDetection => 'Manipulation detection',
+    VerificationSubskill.citationVerification => 'Citation verification',
+    VerificationSubskill.uncertaintyJudgment => 'Uncertainty judgment',
+  };
 
   String get learnerLabel => switch (this) {
-        VerificationSubskill.sourceVerification => 'Check the source',
-        VerificationSubskill.claimVerification => 'Check the claim',
-        VerificationSubskill.mediaProvenance => 'Where did it come from?',
-        VerificationSubskill.manipulationDetection => 'Spot edits & AI',
-        VerificationSubskill.citationVerification => 'Check references',
-        VerificationSubskill.uncertaintyJudgment => 'Know when to say “not sure”',
-      };
+    VerificationSubskill.sourceVerification => 'Check the source',
+    VerificationSubskill.claimVerification => 'Check the claim',
+    VerificationSubskill.mediaProvenance => 'Where did it come from?',
+    VerificationSubskill.manipulationDetection => 'Spot edits & AI',
+    VerificationSubskill.citationVerification => 'Check references',
+    VerificationSubskill.uncertaintyJudgment => 'Know when to say “not sure”',
+  };
 
   String get learnerDescription => switch (this) {
-        VerificationSubskill.sourceVerification =>
-          'See who posted it and whether that source makes sense.',
-        VerificationSubskill.claimVerification =>
-          'Check if the evidence really supports what is being said.',
-        VerificationSubskill.mediaProvenance =>
-          'Look at where a photo, video, or audio clip came from.',
-        VerificationSubskill.manipulationDetection =>
-          'Notice signs that media may be edited or AI-made.',
-        VerificationSubskill.citationVerification =>
-          'Make sure references are real and actually support the claim.',
-        VerificationSubskill.uncertaintyJudgment =>
-          'Recognize when there is not enough information to be sure.',
-      };
+    VerificationSubskill.sourceVerification =>
+      'See who posted it and whether that source makes sense.',
+    VerificationSubskill.claimVerification =>
+      'Check if the evidence really supports what is being said.',
+    VerificationSubskill.mediaProvenance =>
+      'Look at where a photo, video, or audio clip came from.',
+    VerificationSubskill.manipulationDetection =>
+      'Notice signs that media may be edited or AI-made.',
+    VerificationSubskill.citationVerification =>
+      'Make sure references are real and actually support the claim.',
+    VerificationSubskill.uncertaintyJudgment =>
+      'Recognize when there is not enough information to be sure.',
+  };
   String get shortDescription => switch (this) {
-        VerificationSubskill.sourceVerification =>
-          'Judge who published information and whether the source is appropriate.',
-        VerificationSubskill.claimVerification =>
-          'Check whether evidence actually supports a claim.',
-        VerificationSubskill.mediaProvenance =>
-          'Inspect origin, edit history, date, and context of media.',
-        VerificationSubskill.manipulationDetection =>
-          'Recognize edited, synthetic, or misleading media without relying on one clue.',
-        VerificationSubskill.citationVerification =>
-          'Confirm that cited sources exist and support what is being claimed.',
-        VerificationSubskill.uncertaintyJudgment =>
-          'Know when the available evidence is not strong enough for a confident conclusion.',
-      };
+    VerificationSubskill.sourceVerification =>
+      'Judge who published information and whether the source is appropriate.',
+    VerificationSubskill.claimVerification =>
+      'Check whether evidence actually supports a claim.',
+    VerificationSubskill.mediaProvenance =>
+      'Inspect origin, edit history, date, and context of media.',
+    VerificationSubskill.manipulationDetection =>
+      'Recognize edited, synthetic, or misleading media without relying on one clue.',
+    VerificationSubskill.citationVerification =>
+      'Confirm that cited sources exist and support what is being claimed.',
+    VerificationSubskill.uncertaintyJudgment =>
+      'Know when the available evidence is not strong enough for a confident conclusion.',
+  };
 
   static VerificationSubskill? fromId(String? value) {
     final normalized = value?.trim().toLowerCase();
@@ -81,13 +80,13 @@ enum VerificationCaseType { image, video, audio, claim, citation, scam }
 extension VerificationCaseTypeX on VerificationCaseType {
   String get id => name;
   String get label => switch (this) {
-        VerificationCaseType.image => 'Image',
-        VerificationCaseType.video => 'Video',
-        VerificationCaseType.audio => 'Audio',
-        VerificationCaseType.claim => 'Claim',
-        VerificationCaseType.citation => 'Citation',
-        VerificationCaseType.scam => 'Scam',
-      };
+    VerificationCaseType.image => 'Image',
+    VerificationCaseType.video => 'Video',
+    VerificationCaseType.audio => 'Audio',
+    VerificationCaseType.claim => 'Claim',
+    VerificationCaseType.citation => 'Citation',
+    VerificationCaseType.scam => 'Scam',
+  };
 
   static VerificationCaseType fromId(String? value) {
     return VerificationCaseType.values.firstWhere(
@@ -109,24 +108,24 @@ enum VerificationDecision {
 
 extension VerificationDecisionX on VerificationDecision {
   String get id => switch (this) {
-        VerificationDecision.supported => 'supported',
-        VerificationDecision.aiGenerated => 'ai_generated',
-        VerificationDecision.manipulated => 'manipulated',
-        VerificationDecision.misleadingContext => 'misleading_context',
-        VerificationDecision.unsupportedClaim => 'unsupported_claim',
-        VerificationDecision.unverified => 'unverified',
-        VerificationDecision.insufficientEvidence => 'insufficient_evidence',
-      };
+    VerificationDecision.supported => 'supported',
+    VerificationDecision.aiGenerated => 'ai_generated',
+    VerificationDecision.manipulated => 'manipulated',
+    VerificationDecision.misleadingContext => 'misleading_context',
+    VerificationDecision.unsupportedClaim => 'unsupported_claim',
+    VerificationDecision.unverified => 'unverified',
+    VerificationDecision.insufficientEvidence => 'insufficient_evidence',
+  };
 
   String get label => switch (this) {
-        VerificationDecision.supported => 'Looks genuine / supported',
-        VerificationDecision.aiGenerated => 'AI-made',
-        VerificationDecision.manipulated => 'Edited or altered',
-        VerificationDecision.misleadingContext => 'Real, but misleading',
-        VerificationDecision.unsupportedClaim => 'Claim is not supported',
-        VerificationDecision.unverified => 'Cannot verify yet',
-        VerificationDecision.insufficientEvidence => 'Not enough information',
-      };
+    VerificationDecision.supported => 'Looks genuine / supported',
+    VerificationDecision.aiGenerated => 'AI-made',
+    VerificationDecision.manipulated => 'Edited or altered',
+    VerificationDecision.misleadingContext => 'Real, but misleading',
+    VerificationDecision.unsupportedClaim => 'Claim is not supported',
+    VerificationDecision.unverified => 'Cannot verify yet',
+    VerificationDecision.insufficientEvidence => 'Not enough information',
+  };
 
   static VerificationDecision? tryFromId(String? value) {
     final normalized = value?.trim().toLowerCase();
@@ -146,10 +145,10 @@ enum VerificationConfidence { low, medium, high }
 extension VerificationConfidenceX on VerificationConfidence {
   String get id => name;
   String get label => switch (this) {
-        VerificationConfidence.low => 'Low',
-        VerificationConfidence.medium => 'Medium',
-        VerificationConfidence.high => 'High',
-      };
+    VerificationConfidence.low => 'Low',
+    VerificationConfidence.medium => 'Medium',
+    VerificationConfidence.high => 'High',
+  };
 
   static VerificationConfidence fromId(String? value) {
     return VerificationConfidence.values.firstWhere(
@@ -239,6 +238,7 @@ class VerificationCase {
   final DateTime? sourcePublishedAt;
   final bool generated;
   final int sequence;
+  final DateTime? approvedAt;
 
   const VerificationCase({
     required this.id,
@@ -264,6 +264,7 @@ class VerificationCase {
     required this.sourcePublishedAt,
     required this.generated,
     required this.sequence,
+    this.approvedAt,
   });
 
   factory VerificationCase.fromMap(Map<String, dynamic> map) {
@@ -331,6 +332,7 @@ class VerificationCase {
       sourcePublishedAt: _asDate(map['source_published_at']),
       generated: map['generated_by']?.toString() == 'content_automation',
       sequence: _asInt(map['sequence'], fallback: 1),
+      approvedAt: _asDate(map['approved_at']),
     );
   }
 
@@ -501,7 +503,9 @@ class VerificationSessionSummary {
     if (raw is Map) {
       for (final entry in raw.entries) {
         final subskill = VerificationSubskillX.fromId(entry.key.toString());
-        if (subskill != null) scores[subskill] = _asInt(entry.value).clamp(0, 100);
+        if (subskill != null) {
+          scores[subskill] = _asInt(entry.value).clamp(0, 100);
+        }
       }
     }
     return VerificationSessionSummary(
@@ -546,7 +550,9 @@ class VerificationCaseDraft {
     final subskill = VerificationSubskillX.fromId(
       draft['subskill']?.toString() ?? map['subskill']?.toString(),
     );
-    if (subskill == null) throw const FormatException('Unknown draft subskill.');
+    if (subskill == null) {
+      throw const FormatException('Unknown draft subskill.');
+    }
     return VerificationCaseDraft(
       id: map['id']?.toString() ?? '',
       title: map['title']?.toString() ?? draft['title']?.toString() ?? '',
@@ -643,8 +649,9 @@ class VerificationAutomationOverview {
       fallback: 80,
     ).clamp(1, 5000).toInt();
     final draftsToday = _asInt(map['drafts_today']).clamp(0, 99999).toInt();
-    final draftsThisMonth =
-        _asInt(map['drafts_this_month']).clamp(0, 99999).toInt();
+    final draftsThisMonth = _asInt(
+      map['drafts_this_month'],
+    ).clamp(0, 99999).toInt();
 
     return VerificationAutomationOverview(
       enabled: settings['enabled'] != false,
@@ -670,8 +677,9 @@ class VerificationAutomationOverview {
       pendingDrafts: _asInt(map['pending_drafts']).clamp(0, 99999).toInt(),
       draftsToday: draftsToday,
       draftsThisMonth: draftsThisMonth,
-      groqRequestsThisMonth:
-          _asInt(map['groq_requests_this_month']).clamp(0, 999999).toInt(),
+      groqRequestsThisMonth: _asInt(
+        map['groq_requests_this_month'],
+      ).clamp(0, 999999).toInt(),
       groqRequestsRemaining: _asInt(
         map['groq_requests_remaining'],
         fallback: monthlyGroqRequestCap,
@@ -681,12 +689,15 @@ class VerificationAutomationOverview {
       ).clamp(0, 1440).toInt(),
       remainingToday: _asInt(
         map['remaining_today'],
-        fallback: (maxDraftsPerDay - draftsToday).clamp(0, maxDraftsPerDay).toInt(),
+        fallback: (maxDraftsPerDay - draftsToday)
+            .clamp(0, maxDraftsPerDay)
+            .toInt(),
       ).clamp(0, maxDraftsPerDay).toInt(),
       remainingThisMonth: _asInt(
         map['remaining_this_month'],
-        fallback:
-            (monthlyDraftCap - draftsThisMonth).clamp(0, monthlyDraftCap).toInt(),
+        fallback: (monthlyDraftCap - draftsThisMonth)
+            .clamp(0, monthlyDraftCap)
+            .toInt(),
       ).clamp(0, monthlyDraftCap).toInt(),
     );
   }
@@ -734,7 +745,9 @@ class VerificationCaseHealth {
 
   factory VerificationCaseHealth.fromMap(Map<String, dynamic> map) {
     final subskill = VerificationSubskillX.fromId(map['subskill']?.toString());
-    if (subskill == null) throw const FormatException('Unknown health subskill.');
+    if (subskill == null) {
+      throw const FormatException('Unknown health subskill.');
+    }
     return VerificationCaseHealth(
       subskill: subskill,
       publishedCases: _asInt(map['published_cases']),
@@ -762,7 +775,10 @@ String? _nullableString(dynamic value) {
 
 List<String> _stringList(dynamic value) {
   if (value is! List) return const [];
-  return value.map((item) => item.toString()).where((item) => item.trim().isNotEmpty).toList(growable: false);
+  return value
+      .map((item) => item.toString())
+      .where((item) => item.trim().isNotEmpty)
+      .toList(growable: false);
 }
 
 DateTime? _asDate(dynamic value) {

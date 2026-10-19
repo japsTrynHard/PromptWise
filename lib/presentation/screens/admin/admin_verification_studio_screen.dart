@@ -265,20 +265,26 @@ class _AdminVerificationStudioScreenState
                 },
               ),
               const SizedBox(height: AppSpacing.md),
-              ..._filteredCases(controller.cases)
-                  .take(100)
-                  .map(
-                    (item) => Padding(
-                      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-                      child: _CaseBankCard(
-                        item: item,
-                        busy: controller.isMutating,
-                        onEdit: () => _editCase(context, controller, item),
-                        onArchive: () =>
-                            _confirmArchive(context, controller, item),
-                      ),
-                    ),
+              if (_filteredCases(controller.cases).isEmpty)
+                const AppCard(
+                  child: Text('No published cases match these filters.'),
+                )
+              else
+                DraftQueue<VerificationCase>(
+                  key: ValueKey('cases:$_query:$_subskillFilter:$_levelFilter'),
+                  items: _filteredCases(
+                    controller.cases,
+                  ).toList(growable: false),
+                  itemLabel: 'cases',
+                  busy: controller.isMutating,
+                  itemId: (item) => item.id,
+                  itemBuilder: (item) => _CaseBankCard(
+                    item: item,
+                    busy: controller.isMutating,
+                    onEdit: () => _editCase(context, controller, item),
+                    onArchive: () => _confirmArchive(context, controller, item),
                   ),
+                ),
               const SizedBox(height: AppSpacing.section),
             ],
           ],
@@ -1336,6 +1342,11 @@ class _CaseBankCard extends StatelessWidget {
                 const SizedBox(height: AppSpacing.xs),
                 Text(
                   '${item.subskill.label} · ${item.difficulty.label} · ${item.caseType.label}${item.generated ? ' · AI-assisted' : ' · PromptWise curated'}',
+                ),
+                const SizedBox(height: AppSpacing.xs),
+                DraftTimestamp(
+                  createdAt: item.approvedAt,
+                  eventLabel: 'Approved',
                 ),
                 const SizedBox(height: AppSpacing.xs),
                 Text(

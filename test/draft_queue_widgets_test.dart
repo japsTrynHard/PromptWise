@@ -4,6 +4,24 @@ import 'package:promptwise/presentation/widgets/draft_queue_widgets.dart';
 
 void main() {
   test(
+    'approval labels use the approval event and leave unknown dates unavailable',
+    () {
+      final now = DateTime(2026, 10, 19, 22);
+      expect(
+        draftTimestampLabel(
+          DateTime(2026, 10, 19, 21, 5),
+          now: now,
+          eventLabel: 'Approved',
+        ),
+        'Approved today at 9:05 PM',
+      );
+      expect(
+        draftTimestampLabel(null, now: now, eventLabel: 'Approved'),
+        'Approval time unavailable',
+      );
+    },
+  );
+  test(
     'generation dates distinguish today, yesterday, old, missing and future dates',
     () {
       final now = DateTime(2026, 10, 19, 22);

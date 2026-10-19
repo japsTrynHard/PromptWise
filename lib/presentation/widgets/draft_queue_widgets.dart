@@ -3,8 +3,16 @@ import 'package:flutter/material.dart';
 import '../../core/utils/constants.dart';
 import 'app_card.dart';
 
-String draftTimestampLabel(DateTime? createdAt, {required DateTime now}) {
-  if (createdAt == null) return 'Generation time unavailable';
+String draftTimestampLabel(
+  DateTime? createdAt, {
+  required DateTime now,
+  String eventLabel = 'Generated',
+}) {
+  if (createdAt == null) {
+    return eventLabel == 'Approved'
+        ? 'Approval time unavailable'
+        : 'Generation time unavailable';
+  }
   final date = createdAt.toLocal();
   final localNow = now.toLocal();
   final today = DateTime(localNow.year, localNow.month, localNow.day);
@@ -32,19 +40,26 @@ String draftTimestampLabel(DateTime? createdAt, {required DateTime now}) {
       : day == yesterday
       ? 'yesterday'
       : '${months[date.month - 1]} ${date.day}, ${date.year}';
-  return 'Generated $label at $time';
+  return '$eventLabel $label at $time';
 }
 
 class DraftTimestamp extends StatelessWidget {
   final DateTime? createdAt;
-  const DraftTimestamp({super.key, required this.createdAt});
+  final String eventLabel;
+  const DraftTimestamp({
+    super.key,
+    required this.createdAt,
+    this.eventLabel = 'Generated',
+  });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Tooltip(
       message: createdAt == null
-          ? 'This draft has no recorded generation time.'
+          ? eventLabel == 'Approved'
+                ? 'No reliable approval time was recorded for this item.'
+                : 'This draft has no recorded generation time.'
           : '${MaterialLocalizations.of(context).formatFullDate(createdAt!.toLocal())} '
                 '${MaterialLocalizations.of(context).formatTimeOfDay(TimeOfDay.fromDateTime(createdAt!.toLocal()))} (your local time)',
       child: Row(
@@ -58,7 +73,11 @@ class DraftTimestamp extends StatelessWidget {
           const SizedBox(width: 6),
           Expanded(
             child: Text(
-              draftTimestampLabel(createdAt, now: DateTime.now()),
+              draftTimestampLabel(
+                createdAt,
+                now: DateTime.now(),
+                eventLabel: eventLabel,
+              ),
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
               ),
@@ -76,12 +95,14 @@ class DraftQueue<T> extends StatefulWidget {
   final String Function(T) itemId;
   final Widget Function(T) itemBuilder;
   final bool busy;
+  final String itemLabel;
   const DraftQueue({
     super.key,
     required this.items,
     required this.itemId,
     required this.itemBuilder,
     this.busy = false,
+    this.itemLabel = 'drafts',
   });
 
   @override
@@ -143,7 +164,7 @@ class _DraftQueueState<T> extends State<DraftQueue<T>> {
             runSpacing: 8,
             children: [
               Text(
-                'Showing ${start + 1}-$end of ${widget.items.length} loaded drafts',
+                'Showing ${start + 1}-$end of ${widget.items.length} loaded ${widget.itemLabel}',
                 style: Theme.of(context).textTheme.bodySmall,
               ),
               Row(

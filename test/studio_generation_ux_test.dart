@@ -31,6 +31,65 @@ void main() {
   for (final width in [320.0, 1280.0]) {
     for (final verify in [false, true]) {
       testWidgets(
+        '${verify ? 'Published cases' : 'Approved questions'} approval dates and paging at $width px',
+        (tester) async {
+          _viewport(tester, width);
+          final automation = _Automation(bankCount: 7);
+          final studio = _Verification(bankCount: 7);
+          final awareness = _Awareness();
+          addTearDown(automation.dispose);
+          addTearDown(studio.dispose);
+          addTearDown(awareness.dispose);
+          await _mount(tester, automation, studio, awareness, verify: verify);
+          final kind = verify ? 'cases' : 'questions';
+          expect(find.text('Showing 1-5 of 7 loaded $kind'), findsOneWidget);
+          expect(find.text('Bank item 0'), findsOneWidget);
+          expect(find.text('Bank item 5'), findsNothing);
+          expect(find.text('Approval time unavailable'), findsOneWidget);
+          expect(find.textContaining('Approved today at'), findsWidgets);
+          await tester.ensureVisible(find.text('Bank item 0'));
+          await tester.pumpAndSettle();
+          await _preview(
+            tester,
+            '${verify ? 'cases' : 'questions'}-approval-${width.toInt()}',
+          );
+          await tester.ensureVisible(find.byTooltip('Next page'));
+          await tester.pumpAndSettle();
+          await tester.tap(find.byTooltip('Next page'));
+          await tester.pumpAndSettle();
+          expect(find.text('Showing 6-7 of 7 loaded $kind'), findsOneWidget);
+          expect(find.text('Bank item 6'), findsOneWidget);
+          final search = find.byWidgetPredicate(
+            (widget) =>
+                widget is TextField &&
+                (verify
+                    ? widget.decoration?.hintText == 'Search cases'
+                    : widget.decoration?.labelText ==
+                          'Search approved questions'),
+          );
+          await tester.ensureVisible(search);
+          await tester.pumpAndSettle();
+          await tester.enterText(search, 'Bank item 6');
+          await tester.pumpAndSettle();
+          expect(find.text('Showing 1-1 of 1 loaded $kind'), findsOneWidget);
+          expect(
+            find.byWidgetPredicate(
+              (widget) => widget is Text && widget.data == 'Bank item 6',
+            ),
+            findsOneWidget,
+          );
+          expect(find.text('Bank item 5'), findsNothing);
+          await tester.enterText(search, 'no_such_bank_item');
+          await tester.pumpAndSettle();
+          expect(find.byTooltip('Next page'), findsNothing);
+          await tester.enterText(search, '');
+          await tester.pumpAndSettle();
+          expect(find.text('Showing 1-5 of 7 loaded $kind'), findsOneWidget);
+          expect(tester.takeException(), isNull);
+        },
+      );
+
+      testWidgets(
         '${verify ? 'Verify' : 'Learning'} draft timestamps and paging at $width px',
         (tester) async {
           _viewport(tester, width);
@@ -259,7 +318,22 @@ Future<void> _preview(WidgetTester tester, String name) async {
 class _Automation extends ContentAutomationController {
   final bool cooldown;
   final int draftCount;
-  _Automation({this.cooldown = false, this.draftCount = 0});
+  final int bankCount;
+  _Automation({this.cooldown = false, this.draftCount = 0, this.bankCount = 0});
+  @override
+  List<QuestionBankReviewItem> get approvedQuestions => [
+    for (var i = 0; i < bankCount; i++)
+      QuestionBankReviewItem.fromMap({
+        'id': 'approved-question-$i',
+        'stem': 'Bank item $i',
+        'topic_id': 'context',
+        'status': 'published',
+        'validation_status': 'verified',
+        'options': ['One', 'Two', 'Three', 'Four'],
+        'correct_index': 1,
+        if (i > 0) 'approved_at': DateTime.now().toIso8601String(),
+      }),
+  ];
   List<LearningTopic>? topics;
   List<VerificationSubskill>? skills;
   @override
@@ -308,7 +382,21 @@ class _Automation extends ContentAutomationController {
 
 class _Verification extends VerificationStudioController {
   final int draftCount;
-  _Verification({this.draftCount = 0});
+  final int bankCount;
+  _Verification({this.draftCount = 0, this.bankCount = 0});
+  @override
+  List<VerificationCase> get cases => [
+    for (var i = 0; i < bankCount; i++)
+      VerificationCase.fromMap({
+        'id': 'published-case-$i',
+        'title': 'Bank item $i',
+        'scenario': 'Check the source behind this AI claim.',
+        'subskill': 'claim_verification',
+        'correct_decision': 'supported',
+        'explanation': 'The documented evidence supports the claim.',
+        if (i > 0) 'approved_at': DateTime.now().toIso8601String(),
+      }),
+  ];
   @override
   List<VerificationCaseDraft> get drafts => [
     for (var i = 0; i < draftCount; i++)

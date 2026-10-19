@@ -1413,8 +1413,6 @@ class _ApprovedQuestionBankBrowserState
         })
         .toList(growable: false);
 
-    final visible = filtered.take(40).toList(growable: false);
-
     if (widget.items.isEmpty) {
       return const AppCard(
         child: Text(
@@ -1501,27 +1499,26 @@ class _ApprovedQuestionBankBrowserState
           ),
           const SizedBox(height: AppSpacing.lg),
           Text(
-            filtered.length > visible.length
-                ? 'Showing ${visible.length} of ${filtered.length} matching questions'
-                : '${filtered.length} matching question${filtered.length == 1 ? '' : 's'}',
+            '${filtered.length} matching question${filtered.length == 1 ? '' : 's'}',
             style: theme.textTheme.bodySmall?.copyWith(
               color: theme.colorScheme.onSurfaceVariant,
             ),
           ),
           const SizedBox(height: AppSpacing.md),
-          if (visible.isEmpty)
+          if (filtered.isEmpty)
             const Padding(
               padding: EdgeInsets.symmetric(vertical: AppSpacing.lg),
               child: Text('No approved questions match these filters.'),
             )
           else
-            ...visible.map(
-              (item) => Padding(
-                padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-                child: _ApprovedQuestionCard(
-                  item: item,
-                  showAnswerKey: _showAnswerKeys,
-                ),
+            DraftQueue<QuestionBankReviewItem>(
+              key: ValueKey('questions:$_topic:$_difficulty:$query'),
+              items: filtered,
+              itemLabel: 'questions',
+              itemId: (item) => item.id,
+              itemBuilder: (item) => _ApprovedQuestionCard(
+                item: item,
+                showAnswerKey: _showAnswerKeys,
               ),
             ),
         ],
@@ -1579,6 +1576,8 @@ class _ApprovedQuestionCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: AppSpacing.md),
+          DraftTimestamp(createdAt: item.approvedAt, eventLabel: 'Approved'),
+          const SizedBox(height: AppSpacing.sm),
           Text(item.stem, style: theme.textTheme.titleSmall),
           if (item.questionCode.isNotEmpty) ...[
             const SizedBox(height: AppSpacing.xs),
