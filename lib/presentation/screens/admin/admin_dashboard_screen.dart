@@ -12,6 +12,7 @@ import '../../widgets/adaptive_layout.dart';
 import '../../widgets/app_card.dart';
 import '../../widgets/app_logo.dart';
 import '../../widgets/page_intro.dart';
+import '../../widgets/admin_appearance_menu.dart';
 import './admin_content_management_screen.dart';
 import './admin_learning_studio_screen.dart';
 import './admin_verification_studio_screen.dart';
@@ -51,17 +52,17 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     // simultaneously during AnimatedSwitcher transitions can produce stale
     // sliver/render-object assertions on Flutter web. Switch the page
     // directly; individual controls can still animate safely.
-    return KeyedSubtree(
-      key: ValueKey(_index),
-      child: _currentPage,
-    );
+    return KeyedSubtree(key: ValueKey(_index), child: _currentPage);
   }
 
   @override
   Widget build(BuildContext context) {
     if (!kIsWeb) {
       return Scaffold(
-        appBar: AppBar(title: const Text('PromptWise Admin')),
+        appBar: AppBar(
+          title: const Text('PromptWise Admin'),
+          actions: const [AdminAppearanceMenu(compact: true)],
+        ),
         body: const AdaptiveBody(
           child: Center(
             child: Padding(
@@ -139,6 +140,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
               overflow: TextOverflow.ellipsis,
             ),
             actions: [
+              const AdminAppearanceMenu(compact: true),
               IconButton(
                 tooltip: 'Sign out',
                 onPressed: _signOut,
@@ -201,7 +203,9 @@ class _AdminSidebar extends StatelessWidget {
       width: 260,
       margin: const EdgeInsets.all(AppSpacing.md),
       decoration: BoxDecoration(
-        color: theme.colorScheme.surface.withValues(alpha: isDark ? 0.90 : 0.94),
+        color: theme.colorScheme.surface.withValues(
+          alpha: isDark ? 0.90 : 0.94,
+        ),
         borderRadius: BorderRadius.circular(AppRadius.xl),
         border: Border.all(color: theme.colorScheme.outlineVariant),
         boxShadow: [
@@ -248,6 +252,8 @@ class _AdminSidebar extends StatelessWidget {
                 ),
               ),
             const Spacer(),
+            const AdminAppearanceMenu(),
+            const SizedBox(height: AppSpacing.sm),
             AppCard(
               padding: const EdgeInsets.all(AppSpacing.md),
               child: Row(
@@ -325,10 +331,17 @@ class _AdminRail extends StatelessWidget {
           alignment: Alignment.bottomCenter,
           child: Padding(
             padding: const EdgeInsets.only(bottom: AppSpacing.lg),
-            child: IconButton(
-              tooltip: 'Sign out',
-              onPressed: onSignOut,
-              icon: const Icon(Icons.logout_rounded),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const AdminAppearanceMenu(compact: true),
+                const SizedBox(height: AppSpacing.sm),
+                IconButton(
+                  tooltip: 'Sign out',
+                  onPressed: onSignOut,
+                  icon: const Icon(Icons.logout_rounded),
+                ),
+              ],
             ),
           ),
         ),
@@ -387,6 +400,8 @@ class _AdminDrawer extends StatelessWidget {
             ),
             onTap: () => onSelected(index),
           ),
+        const Divider(),
+        const AdminAppearanceMenu(),
       ],
     );
   }
@@ -527,7 +542,9 @@ class _UsersPageState extends State<_UsersPage> {
 
   void _refresh() {
     setState(() {
-      _profilesFuture = context.read<AuthController>().loadAllProfiles(force: true);
+      _profilesFuture = context.read<AuthController>().loadAllProfiles(
+        force: true,
+      );
     });
   }
 
