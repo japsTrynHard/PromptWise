@@ -32,3 +32,11 @@ All five learning topic IDs are forwarded independently in repository tests. Thi
 No remote function deployment, database migration, provider generation, or remote data mutation was performed. Deploy the updated `content-automation` function together with the Flutter frontend to activate live Verification skill enforcement; an older deployed function does not implement the new `focus_skills` field. Existing learning focus selection does not require a new schema change.
 
 Live source availability and actual generated content for every selected topic still need a bounded staging check. A topic with no suitable trusted source must report that condition rather than generate unrelated material. A cooldown still blocks subsequent requests across topics until it expires; the UI now explains this behavior.
+
+## Draft timestamps and pagination follow-up
+
+Both generated-draft queues now show the recorded `created_at` value as a device-local date/time: today, yesterday, or a readable calendar date. The full local date/time is available in a tooltip. Missing timestamps remain explicitly unavailable; source publication dates are not used as generation dates.
+
+The queues share Flexy-inspired rounded page controls, a visible range/count, and 5/10/20 drafts per page. Desktop shows first/previous/numbered/next/last controls; mobile uses a compact current-page control with previous/next. Paging covers the records already returned by the existing repository limits (50 lesson drafts, 100 Verify drafts); it does not claim a total across older, unloaded records or add extra server requests. Newly arriving drafts reset to page one; approval/rejection clamps the current page to valid results. Controls disable during mutations.
+
+Validation: 236 Flutter tests passed; analyzer clean. Four focused timestamp/paging tests and ten Studio integration tests passed, including actual draft cards at 320px and 1280px. Rendered draft cards and pagination were visually inspected with a local preview font. No palette, database, generation-service, or dependency changes were needed for this follow-up.

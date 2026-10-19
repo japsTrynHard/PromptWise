@@ -15,6 +15,7 @@ import '../../widgets/page_intro.dart';
 import '../../widgets/section_header.dart';
 import '../../widgets/state_message.dart';
 import '../../widgets/studio_generation_widgets.dart';
+import '../../widgets/draft_queue_widgets.dart';
 
 class AdminVerificationStudioScreen extends StatefulWidget {
   const AdminVerificationStudioScreen({super.key});
@@ -224,17 +225,16 @@ class _AdminVerificationStudioScreenState
                   ),
                 )
               else
-                ...controller.drafts.map(
-                  (draft) => Padding(
-                    padding: const EdgeInsets.only(bottom: AppSpacing.md),
-                    child: _DraftCard(
-                      draft: draft,
-                      busy: controller.isMutating,
-                      onApprove: () =>
-                          _confirmApprove(context, controller, draft),
-                      onReject: () =>
-                          _confirmReject(context, controller, draft),
-                    ),
+                DraftQueue<VerificationCaseDraft>(
+                  items: controller.drafts,
+                  itemId: (draft) => draft.id,
+                  busy: controller.isMutating,
+                  itemBuilder: (draft) => _DraftCard(
+                    draft: draft,
+                    busy: controller.isMutating,
+                    onApprove: () =>
+                        _confirmApprove(context, controller, draft),
+                    onReject: () => _confirmReject(context, controller, draft),
                   ),
                 ),
               const SizedBox(height: AppSpacing.section),
@@ -1182,6 +1182,8 @@ class _DraftCard extends StatelessWidget {
             '${draft.subskill.label} · ${_levelLabel(draft.difficulty)} · ${draft.caseType.label} · ${draft.sourceName}',
           ),
           const SizedBox(height: AppSpacing.md),
+          DraftTimestamp(createdAt: draft.createdAt),
+          const SizedBox(height: AppSpacing.sm),
           Text(draft.summary),
           const SizedBox(height: AppSpacing.lg),
           Wrap(

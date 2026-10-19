@@ -15,6 +15,7 @@ import 'package:promptwise/presentation/controllers/content_automation_controlle
 import 'package:promptwise/presentation/controllers/verification_controller.dart';
 import 'package:promptwise/presentation/screens/admin/admin_learning_studio_screen.dart';
 import 'package:promptwise/presentation/screens/admin/admin_verification_studio_screen.dart';
+import 'package:promptwise/presentation/widgets/draft_queue_widgets.dart';
 
 void main() {
   setUpAll(() async {
@@ -29,6 +30,42 @@ void main() {
   });
   for (final width in [320.0, 1280.0]) {
     for (final verify in [false, true]) {
+      testWidgets(
+        '${verify ? 'Verify' : 'Learning'} draft timestamps and paging at $width px',
+        (tester) async {
+          _viewport(tester, width);
+          final automation = _Automation(draftCount: 6);
+          final studio = _Verification(draftCount: 6);
+          final awareness = _Awareness();
+          addTearDown(automation.dispose);
+          addTearDown(studio.dispose);
+          addTearDown(awareness.dispose);
+          await _mount(tester, automation, studio, awareness, verify: verify);
+          expect(find.byType(DraftTimestamp), findsNWidgets(5));
+          expect(find.text('Generated draft 0'), findsOneWidget);
+          expect(find.text('Generated draft 5'), findsNothing);
+          await tester.ensureVisible(find.text('Generated draft 0'));
+          await tester.pumpAndSettle();
+          await _preview(
+            tester,
+            '${verify ? 'verify' : 'learning'}-drafts-${width.toInt()}',
+          );
+          await tester.ensureVisible(find.byTooltip('Next page'));
+          await tester.pumpAndSettle();
+          await _preview(
+            tester,
+            '${verify ? 'verify' : 'learning'}-pagination-${width.toInt()}',
+          );
+          await tester.tap(find.byTooltip('Next page'));
+          await tester.pumpAndSettle();
+          expect(find.text('Generated draft 5'), findsOneWidget);
+          expect(find.text('Generated draft 0'), findsNothing);
+          expect(find.text('Showing 6-6 of 6 loaded drafts'), findsOneWidget);
+          expect(find.byType(DraftTimestamp), findsOneWidget);
+          expect(tester.takeException(), isNull);
+        },
+      );
+
       testWidgets(
         '${verify ? 'Verify' : 'Learning'} focus selection at $width px',
         (tester) async {
@@ -221,9 +258,25 @@ Future<void> _preview(WidgetTester tester, String name) async {
 
 class _Automation extends ContentAutomationController {
   final bool cooldown;
-  _Automation({this.cooldown = false});
+  final int draftCount;
+  _Automation({this.cooldown = false, this.draftCount = 0});
   List<LearningTopic>? topics;
   List<VerificationSubskill>? skills;
+  @override
+  List<GeneratedContentDraft> get drafts => [
+    for (var i = 0; i < draftCount; i++)
+      GeneratedContentDraft.fromMap({
+        'id': 'lesson-draft-$i',
+        'title': 'Generated draft $i',
+        'summary':
+            'Help learners add clear context and audience details to an AI prompt.',
+        'topic_id': 'context',
+        'source_name': 'Trusted learning source',
+        'created_at': DateTime.now()
+            .subtract(Duration(days: i))
+            .toIso8601String(),
+      }),
+  ];
   @override
   bool get isAdministrator => true;
   @override
@@ -254,6 +307,23 @@ class _Automation extends ContentAutomationController {
 }
 
 class _Verification extends VerificationStudioController {
+  final int draftCount;
+  _Verification({this.draftCount = 0});
+  @override
+  List<VerificationCaseDraft> get drafts => [
+    for (var i = 0; i < draftCount; i++)
+      VerificationCaseDraft.fromMap({
+        'id': 'verify-draft-$i',
+        'title': 'Generated draft $i',
+        'summary':
+            'Review the original source before accepting a claim about AI.',
+        'subskill': 'source_verification',
+        'source_name': 'Trusted awareness source',
+        'created_at': DateTime.now()
+            .subtract(Duration(days: i))
+            .toIso8601String(),
+      }),
+  ];
   @override
   bool get isAdministrator => true;
   @override

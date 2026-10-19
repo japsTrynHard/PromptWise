@@ -14,6 +14,7 @@ import '../../widgets/page_intro.dart';
 import '../../widgets/section_header.dart';
 import '../../widgets/state_message.dart';
 import '../../widgets/studio_generation_widgets.dart';
+import '../../widgets/draft_queue_widgets.dart';
 
 class AdminLearningStudioScreen extends StatefulWidget {
   const AdminLearningStudioScreen({super.key});
@@ -164,15 +165,15 @@ class _AdminLearningStudioScreenState extends State<AdminLearningStudioScreen> {
             ),
           )
         else
-          ...controller.drafts.map(
-            (draft) => Padding(
-              padding: const EdgeInsets.only(bottom: AppSpacing.md),
-              child: _DraftCard(
-                draft: draft,
-                busy: controller.isMutating,
-                onPublish: () => _confirmPublish(context, draft),
-                onReject: () => _confirmReject(context, draft),
-              ),
+          DraftQueue<GeneratedContentDraft>(
+            items: controller.drafts,
+            itemId: (draft) => draft.id,
+            busy: controller.isMutating,
+            itemBuilder: (draft) => _DraftCard(
+              draft: draft,
+              busy: controller.isMutating,
+              onPublish: () => _confirmPublish(context, draft),
+              onReject: () => _confirmReject(context, draft),
             ),
           ),
         const SizedBox(height: AppSpacing.section),
@@ -975,6 +976,8 @@ class _DraftCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: AppSpacing.md),
+          DraftTimestamp(createdAt: draft.createdAt),
+          const SizedBox(height: AppSpacing.sm),
           Text(
             draft.summary,
             style: Theme.of(
