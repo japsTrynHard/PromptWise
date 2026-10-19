@@ -3,17 +3,15 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../controllers/auth_controller.dart';
-import '../../controllers/content_controller.dart';
-import '../../../data/models/app_profile.dart';
-import '../../../data/models/content_item.dart';
 import '../../../core/routes/app_routes.dart';
 import '../../../core/utils/constants.dart';
 import '../../widgets/adaptive_layout.dart';
 import '../../widgets/app_card.dart';
 import '../../widgets/app_logo.dart';
-import '../../widgets/page_intro.dart';
 import '../../widgets/admin_appearance_menu.dart';
 import './admin_content_management_screen.dart';
+import 'admin_workspace_pages.dart';
+import 'admin_content_insights.dart';
 import './admin_learning_studio_screen.dart';
 import './admin_verification_studio_screen.dart';
 
@@ -26,18 +24,32 @@ class AdminDashboardScreen extends StatefulWidget {
 
 class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   int _index = 0;
+  AdminContentFilter _contentFilter = const AdminContentFilter();
+
+  void _openContent(AdminContentFilter filter) {
+    setState(() {
+      _contentFilter = filter;
+      _index = 1;
+    });
+  }
 
   Widget get _currentPage => switch (_index) {
-    0 => _OverviewPage(onOpenContent: () => _select(1)),
-    1 => const AdminContentManagementScreen(),
+    0 => AdminOverviewPage(onOpenContent: _openContent, onOpenStudio: _select),
+    1 => AdminContentManagementScreen(initialFilter: _contentFilter),
     2 => const AdminLearningStudioScreen(),
     3 => const AdminVerificationStudioScreen(),
-    _ => const _UsersPage(),
+    _ => AdminUsersPage(
+      loadProfiles: (force) =>
+          context.read<AuthController>().loadAllProfiles(force: force),
+    ),
   };
 
   void _select(int value) {
     if (_index == value) return;
-    setState(() => _index = value);
+    setState(() {
+      _index = value;
+      if (value == 1) _contentFilter = const AdminContentFilter();
+    });
   }
 
   Future<void> _signOut() async {
@@ -453,367 +465,6 @@ class _AdminNavButton extends StatelessWidget {
             ],
           ),
         ),
-      ),
-    );
-  }
-}
-
-class _OverviewPage extends StatelessWidget {
-  final VoidCallback onOpenContent;
-
-  const _OverviewPage({required this.onOpenContent});
-
-  @override
-  Widget build(BuildContext context) {
-    final content = context.watch<ContentController>();
-    final publishedCount = content.items
-        .where((item) => item.status == ContentStatus.published)
-        .length;
-    final draftCount = content.items
-        .where((item) => item.status == ContentStatus.draft)
-        .length;
-
-    return _AdminPage(
-      intro: const PageIntro(
-        title: 'Overview',
-        description:
-            'Review the learning content that is currently available in PromptWise.',
-      ),
-      children: [
-        Align(
-          alignment: Alignment.centerRight,
-          child: FilledButton.icon(
-            onPressed: onOpenContent,
-            icon: const Icon(Icons.library_books_outlined),
-            label: const Text('Manage content'),
-          ),
-        ),
-        const SizedBox(height: AppSpacing.xl),
-        _MetricGrid(
-          metrics: [
-            _Metric(
-              'Published content',
-              '$publishedCount',
-              'Visible to learners',
-              Icons.visibility_outlined,
-            ),
-            _Metric(
-              'Draft content',
-              '$draftCount',
-              'Still being prepared',
-              Icons.edit_note_rounded,
-            ),
-            _Metric(
-              'Learning modules',
-              '${content.modules.length}',
-              'Available in Learn',
-              Icons.menu_book_outlined,
-            ),
-            _Metric(
-              'Practice activities',
-              '${content.quizzes.length + content.activities.length}',
-              '${content.quizzes.length} quizzes · ${content.activities.length} Real or AI rounds',
-              Icons.school_outlined,
-            ),
-          ],
-        ),
-        const SizedBox(height: AppSpacing.lg),
-        _QuickActionsCard(onOpenContent: onOpenContent),
-      ],
-    );
-  }
-}
-
-class _UsersPage extends StatefulWidget {
-  const _UsersPage();
-
-  @override
-  State<_UsersPage> createState() => _UsersPageState();
-}
-
-class _UsersPageState extends State<_UsersPage> {
-  late Future<List<AppProfile>> _profilesFuture;
-
-  @override
-  void initState() {
-    super.initState();
-    _profilesFuture = context.read<AuthController>().loadAllProfiles();
-  }
-
-  void _refresh() {
-    setState(() {
-      _profilesFuture = context.read<AuthController>().loadAllProfiles(
-        force: true,
-      );
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return _AdminPage(
-      intro: const PageIntro(
-        title: 'Users',
-        description:
-            'View the learner and administrator accounts in PromptWise.',
-      ),
-      children: [
-        Align(
-          alignment: Alignment.centerRight,
-          child: OutlinedButton.icon(
-            onPressed: _refresh,
-            icon: const Icon(Icons.refresh_rounded),
-            label: const Text('Refresh'),
-          ),
-        ),
-        const SizedBox(height: AppSpacing.lg),
-        FutureBuilder<List<AppProfile>>(
-          future: _profilesFuture,
-          builder: (context, snapshot) {
-            if (snapshot.connectionState == ConnectionState.waiting) {
-              return const AppCard(
-                child: Center(child: CircularProgressIndicator()),
-              );
-            }
-            if (snapshot.hasError) {
-              return AppCard(
-                child: Column(
-                  children: [
-                    const Icon(Icons.wifi_off_rounded, size: 40),
-                    const SizedBox(height: AppSpacing.md),
-                    const Text(
-                      'Users could not be loaded. Check your connection and try again.',
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: AppSpacing.md),
-                    FilledButton.icon(
-                      onPressed: _refresh,
-                      icon: const Icon(Icons.refresh_rounded),
-                      label: const Text('Try again'),
-                    ),
-                  ],
-                ),
-              );
-            }
-            final profiles = snapshot.data ?? const <AppProfile>[];
-            if (profiles.isEmpty) {
-              return const AppCard(child: Text('No user accounts were found.'));
-            }
-            return _UsersTable(profiles: profiles);
-          },
-        ),
-      ],
-    );
-  }
-}
-
-class _UsersTable extends StatelessWidget {
-  final List<AppProfile> profiles;
-
-  const _UsersTable({required this.profiles});
-
-  @override
-  Widget build(BuildContext context) {
-    return AppCard(
-      padding: EdgeInsets.zero,
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: DataTable(
-          columns: const [
-            DataColumn(label: Text('Name')),
-            DataColumn(label: Text('Email')),
-            DataColumn(label: Text('Account type')),
-            DataColumn(label: Text('Created')),
-          ],
-          rows: profiles
-              .map((profile) {
-                final created = profile.createdAt?.toLocal();
-                final date = created == null
-                    ? '—'
-                    : '${created.year}-${created.month.toString().padLeft(2, '0')}-${created.day.toString().padLeft(2, '0')}';
-                return DataRow(
-                  cells: [
-                    DataCell(
-                      Text(
-                        profile.fullName.isEmpty
-                            ? 'Unnamed user'
-                            : profile.fullName,
-                      ),
-                    ),
-                    DataCell(Text(profile.email)),
-                    DataCell(Text(profile.role.label)),
-                    DataCell(Text(date)),
-                  ],
-                );
-              })
-              .toList(growable: false),
-        ),
-      ),
-    );
-  }
-}
-
-class _AdminPage extends StatelessWidget {
-  final PageIntro intro;
-  final List<Widget> children;
-
-  const _AdminPage({required this.intro, required this.children});
-
-  @override
-  Widget build(BuildContext context) {
-    return AdaptiveBody(
-      useSafeArea: false,
-      maxWidth: 1440,
-      child: CustomScrollView(
-        slivers: [
-          SliverPadding(
-            padding: AdaptiveLayout.pageInsets(context),
-            sliver: SliverList(
-              delegate: SliverChildListDelegate([
-                intro,
-                const SizedBox(height: AppSpacing.xxl),
-                ...children,
-              ]),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _MetricGrid extends StatelessWidget {
-  final List<_Metric> metrics;
-
-  const _MetricGrid({required this.metrics});
-
-  @override
-  Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final columns = AdaptiveLayout.gridColumns(
-          constraints.maxWidth,
-          minimumTileWidth: 240,
-          maximumColumns: 4,
-        );
-        final width =
-            (constraints.maxWidth - (AppSpacing.lg * (columns - 1))) / columns;
-        return Wrap(
-          spacing: AppSpacing.lg,
-          runSpacing: AppSpacing.lg,
-          children: metrics
-              .map(
-                (metric) => SizedBox(
-                  width: width,
-                  child: AppCard(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Icon(
-                          metric.icon,
-                          color: Theme.of(context).colorScheme.primary,
-                        ),
-                        const SizedBox(height: AppSpacing.md),
-                        Text(
-                          metric.value,
-                          style: Theme.of(context).textTheme.headlineSmall,
-                        ),
-                        const SizedBox(height: AppSpacing.xs),
-                        Text(
-                          metric.label,
-                          style: Theme.of(context).textTheme.titleSmall,
-                        ),
-                        const SizedBox(height: AppSpacing.xs),
-                        Text(
-                          metric.note,
-                          style: Theme.of(context).textTheme.bodySmall
-                              ?.copyWith(
-                                color: Theme.of(
-                                  context,
-                                ).colorScheme.onSurfaceVariant,
-                              ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              )
-              .toList(growable: false),
-        );
-      },
-    );
-  }
-}
-
-class _Metric {
-  final String label;
-  final String value;
-  final String note;
-  final IconData icon;
-
-  const _Metric(this.label, this.value, this.note, this.icon);
-}
-
-class _QuickActionsCard extends StatelessWidget {
-  final VoidCallback onOpenContent;
-
-  const _QuickActionsCard({required this.onOpenContent});
-
-  @override
-  Widget build(BuildContext context) {
-    return AppCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text(
-            'Content management',
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
-          const SizedBox(height: AppSpacing.lg),
-          _QuickAction(
-            icon: Icons.note_add_outlined,
-            label: 'Create or edit lessons',
-            onPressed: onOpenContent,
-          ),
-          _QuickAction(
-            icon: Icons.quiz_outlined,
-            label: 'Manage quizzes and Real or AI activities',
-            onPressed: onOpenContent,
-          ),
-          _QuickAction(
-            icon: Icons.campaign_outlined,
-            label: 'Manage AI awareness guidance',
-            onPressed: onOpenContent,
-          ),
-          _QuickAction(
-            icon: Icons.history_rounded,
-            label: 'Review previous content versions',
-            onPressed: onOpenContent,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _QuickAction extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final VoidCallback onPressed;
-
-  const _QuickAction({
-    required this.icon,
-    required this.label,
-    required this.onPressed,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-      child: OutlinedButton.icon(
-        onPressed: onPressed,
-        icon: Icon(icon),
-        label: Align(alignment: Alignment.centerLeft, child: Text(label)),
       ),
     );
   }

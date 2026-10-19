@@ -9,9 +9,15 @@ import '../../widgets/adaptive_layout.dart';
 import '../../widgets/app_card.dart';
 import '../../widgets/page_intro.dart';
 import '../../widgets/state_message.dart';
+import '../../widgets/admin_record_browser.dart';
+import 'admin_content_insights.dart';
 
 class AdminContentManagementScreen extends StatefulWidget {
-  const AdminContentManagementScreen({super.key});
+  final AdminContentFilter initialFilter;
+  const AdminContentManagementScreen({
+    super.key,
+    this.initialFilter = const AdminContentFilter(),
+  });
 
   @override
   State<AdminContentManagementScreen> createState() =>
@@ -23,12 +29,24 @@ class _AdminContentManagementScreenState
   final _searchController = TextEditingController();
 
   String _query = '';
+  String? _exactItemId;
   ContentType? _typeFilter;
   ContentStatus? _statusFilter;
+  LearningTopic? _topicFilter;
+  ContentAttention _attention = ContentAttention.all;
+  String _sort = 'updated';
 
   @override
   void initState() {
     super.initState();
+    final filter = widget.initialFilter;
+    _query = filter.query;
+    _exactItemId = filter.itemId;
+    _searchController.text = filter.query;
+    _typeFilter = filter.type;
+    _statusFilter = filter.status;
+    _topicFilter = filter.topic;
+    _attention = filter.attention;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) context.read<ContentController>().refresh();
     });
@@ -44,24 +62,39 @@ class _AdminContentManagementScreenState
   Widget build(BuildContext context) {
     final content = context.watch<ContentController>();
 
-    final items = content.items
-        .where((item) {
-          final query = _query.trim().toLowerCase();
+    final items = content.items.where((item) {
+      final query = _query.trim().toLowerCase();
 
-          final matchesQuery =
-              query.isEmpty ||
-              item.displayTitle.toLowerCase().contains(query) ||
-              item.description.toLowerCase().contains(query) ||
-              item.id.toLowerCase().contains(query);
+      final matchesQuery =
+          query.isEmpty ||
+          item.displayTitle.toLowerCase().contains(query) ||
+          item.description.toLowerCase().contains(query) ||
+          item.id.toLowerCase().contains(query);
 
-          final matchesType = _typeFilter == null || item.type == _typeFilter;
+      final matchesType = _typeFilter == null || item.type == _typeFilter;
 
-          final matchesStatus =
-              _statusFilter == null || item.status == _statusFilter;
+      final matchesStatus =
+          _statusFilter == null || item.status == _statusFilter;
 
-          return matchesQuery && matchesType && matchesStatus;
-        })
-        .toList(growable: false);
+      return (_exactItemId == null || item.id == _exactItemId) &&
+          matchesQuery &&
+          matchesType &&
+          matchesStatus &&
+          (_topicFilter == null || item.adaptiveTopic == _topicFilter) &&
+          matchesContentAttention(item, _attention, DateTime.now());
+    }).toList();
+    items.sort((a, b) {
+      final result = _sort == 'title'
+          ? a.displayTitle.toLowerCase().compareTo(b.displayTitle.toLowerCase())
+          : _sort == 'review'
+          ? (a.reviewDate ?? DateTime(9999)).compareTo(
+              b.reviewDate ?? DateTime(9999),
+            )
+          : (b.updatedAt ?? b.createdAt ?? DateTime(1970)).compareTo(
+              a.updatedAt ?? a.createdAt ?? DateTime(1970),
+            );
+      return result != 0 ? result : a.id.compareTo(b.id);
+    });
 
     return AdaptiveBody(
       useSafeArea: false,
@@ -90,7 +123,13 @@ class _AdminContentManagementScreenState
                     const SizedBox(height: AppSpacing.lg),
                   ],
 
-                  _ContentSummary(items: content.items),
+                  _ContentSummary(
+                    items: content.items,
+                    onSelected: (value) => setState(() {
+                      _statusFilter = value;
+                      _attention = ContentAttention.all;
+                    }),
+                  ),
 
                   const SizedBox(height: AppSpacing.xl),
 
@@ -100,11 +139,17 @@ class _AdminContentManagementScreenState
                     typeFilter: _typeFilter,
                     statusFilter: _statusFilter,
                     onQueryChanged: (value) {
-                      setState(() => _query = value);
+                      setState(() {
+                        _query = value;
+                        _exactItemId = null;
+                      });
                     },
                     onClearSearch: () {
                       _searchController.clear();
-                      setState(() => _query = '');
+                      setState(() {
+                        _query = '';
+                        _exactItemId = null;
+                      });
                     },
                     onTypeChanged: (value) {
                       setState(() => _typeFilter = value);
@@ -120,6 +165,8 @@ class _AdminContentManagementScreenState
 
                   const SizedBox(height: AppSpacing.xl),
 
+                  _buildContentTools(),
+                  const SizedBox(height: AppSpacing.lg),
                   if (content.isLoading && content.items.isEmpty)
                     const AppCard(
                       child: Center(child: CircularProgressIndicator()),
@@ -137,56 +184,64 @@ class _AdminContentManagementScreenState
                       onAction: content.isMutating ? null : () => _openEditor(),
                     )
                   else
-                    LayoutBuilder(
-                      builder: (context, constraints) {
-                        if (constraints.maxWidth >= 900) {
-                          return _ContentDataTable(
-                            items: items,
-                            disabled: content.isMutating,
-                            onEdit: _openEditor,
-                            onPublish: (item) =>
-                                _setStatus(item, ContentStatus.published),
-                            onArchive: (item) =>
-                                _setStatus(item, ContentStatus.archived),
-                            onDraft: (item) =>
-                                _setStatus(item, ContentStatus.draft),
-                            onVersions: _showVersions,
-                            onDelete: _deleteItem,
-                          );
-                        }
+                    AdminRecordBrowser<ContentItem>(
+                      key: ValueKey(
+                        '$_query:$_typeFilter:$_statusFilter:$_topicFilter:$_attention:$_sort',
+                      ),
+                      items: items,
+                      noun: 'content items',
+                      builder: (pageItems) => LayoutBuilder(
+                        builder: (context, constraints) {
+                          final items = pageItems;
+                          if (constraints.maxWidth >= 900) {
+                            return _ContentDataTable(
+                              items: items,
+                              disabled: content.isMutating,
+                              onEdit: _openEditor,
+                              onPublish: (item) =>
+                                  _setStatus(item, ContentStatus.published),
+                              onArchive: (item) =>
+                                  _setStatus(item, ContentStatus.archived),
+                              onDraft: (item) =>
+                                  _setStatus(item, ContentStatus.draft),
+                              onVersions: _showVersions,
+                              onDelete: _deleteItem,
+                            );
+                          }
 
-                        return Column(
-                          children: [
-                            for (
-                              var index = 0;
-                              index < items.length;
-                              index++
-                            ) ...[
-                              _ContentCard(
-                                item: items[index],
-                                disabled: content.isMutating,
-                                onEdit: () => _openEditor(items[index]),
-                                onPublish: () => _setStatus(
-                                  items[index],
-                                  ContentStatus.published,
+                          return Column(
+                            children: [
+                              for (
+                                var index = 0;
+                                index < items.length;
+                                index++
+                              ) ...[
+                                _ContentCard(
+                                  item: items[index],
+                                  disabled: content.isMutating,
+                                  onEdit: () => _openEditor(items[index]),
+                                  onPublish: () => _setStatus(
+                                    items[index],
+                                    ContentStatus.published,
+                                  ),
+                                  onArchive: () => _setStatus(
+                                    items[index],
+                                    ContentStatus.archived,
+                                  ),
+                                  onDraft: () => _setStatus(
+                                    items[index],
+                                    ContentStatus.draft,
+                                  ),
+                                  onVersions: () => _showVersions(items[index]),
+                                  onDelete: () => _deleteItem(items[index]),
                                 ),
-                                onArchive: () => _setStatus(
-                                  items[index],
-                                  ContentStatus.archived,
-                                ),
-                                onDraft: () => _setStatus(
-                                  items[index],
-                                  ContentStatus.draft,
-                                ),
-                                onVersions: () => _showVersions(items[index]),
-                                onDelete: () => _deleteItem(items[index]),
-                              ),
-                              if (index != items.length - 1)
-                                const SizedBox(height: AppSpacing.md),
+                                if (index != items.length - 1)
+                                  const SizedBox(height: AppSpacing.md),
+                              ],
                             ],
-                          ],
-                        );
-                      },
+                          );
+                        },
+                      ),
                     ),
 
                   const SizedBox(height: AppSpacing.xxl),
@@ -198,6 +253,101 @@ class _AdminContentManagementScreenState
       ),
     );
   }
+
+  Widget _buildContentTools() => AppCard(
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text('Content tools', style: Theme.of(context).textTheme.titleMedium),
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final entry in {
+              ContentAttention.all: 'All content',
+              ContentAttention.reviewDue: 'Review due',
+              ContentAttention.topicUnassigned: 'Topic unassigned',
+              ContentAttention.practice: 'Practice only',
+            }.entries)
+              ChoiceChip(
+                label: Text(entry.value),
+                selected: _attention == entry.key,
+                onSelected: (_) => setState(() => _attention = entry.key),
+              ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        LayoutBuilder(
+          builder: (context, constraints) => Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              SizedBox(
+                width: constraints.maxWidth.clamp(0, 240),
+                child: DropdownButtonFormField<LearningTopic?>(
+                  key: ValueKey('topic:$_topicFilter'),
+                  initialValue: _topicFilter,
+                  isExpanded: true,
+                  decoration: const InputDecoration(labelText: 'Topic'),
+                  items: [
+                    const DropdownMenuItem<LearningTopic?>(
+                      value: null,
+                      child: Text('All topics'),
+                    ),
+                    ...LearningTopic.values.map(
+                      (t) => DropdownMenuItem(value: t, child: Text(t.label)),
+                    ),
+                  ],
+                  onChanged: (v) => setState(() => _topicFilter = v),
+                ),
+              ),
+              SizedBox(
+                width: constraints.maxWidth.clamp(0, 240),
+                child: DropdownButtonFormField<String>(
+                  initialValue: _sort,
+                  isExpanded: true,
+                  decoration: const InputDecoration(labelText: 'Sort content'),
+                  items: const [
+                    DropdownMenuItem(
+                      value: 'updated',
+                      child: Text('Recently updated'),
+                    ),
+                    DropdownMenuItem(value: 'title', child: Text('Title A–Z')),
+                    DropdownMenuItem(
+                      value: 'review',
+                      child: Text('Earliest review date'),
+                    ),
+                  ],
+                  onChanged: (v) => setState(() => _sort = v!),
+                ),
+              ),
+              TextButton.icon(
+                onPressed: () {
+                  _searchController.clear();
+                  setState(() {
+                    _query = '';
+                    _exactItemId = null;
+                    _typeFilter = null;
+                    _statusFilter = null;
+                    _topicFilter = null;
+                    _attention = ContentAttention.all;
+                  });
+                },
+                icon: const Icon(Icons.filter_alt_off_outlined),
+                label: const Text('Reset filters'),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 8),
+        const Text(
+          'Review due uses scheduled dates on published content. Topic unassigned shows lessons/quizzes using automatic topic selection.',
+        ),
+      ],
+    ),
+  );
 
   Future<void> _openEditor([ContentItem? existing]) async {
     final controller = context.read<ContentController>();
@@ -332,7 +482,8 @@ class _AdminContentManagementScreenState
 class _ContentSummary extends StatelessWidget {
   final List<ContentItem> items;
 
-  const _ContentSummary({required this.items});
+  final ValueChanged<ContentStatus?> onSelected;
+  const _ContentSummary({required this.items, required this.onSelected});
 
   @override
   Widget build(BuildContext context) {
@@ -352,21 +503,25 @@ class _ContentSummary extends StatelessWidget {
       builder: (context, constraints) {
         final cards = [
           _SummaryMetric(
+            onTap: () => onSelected(null),
             label: 'All content',
             value: '${items.length}',
             icon: Icons.library_books_outlined,
           ),
           _SummaryMetric(
+            onTap: () => onSelected(ContentStatus.published),
             label: 'Published',
             value: '$published',
             icon: Icons.public_rounded,
           ),
           _SummaryMetric(
+            onTap: () => onSelected(ContentStatus.draft),
             label: 'Drafts',
             value: '$draft',
             icon: Icons.edit_note_rounded,
           ),
           _SummaryMetric(
+            onTap: () => onSelected(ContentStatus.archived),
             label: 'Archived',
             value: '$archived',
             icon: Icons.archive_outlined,
@@ -397,8 +552,10 @@ class _SummaryMetric extends StatelessWidget {
   final String label;
   final String value;
   final IconData icon;
+  final VoidCallback onTap;
 
   const _SummaryMetric({
+    required this.onTap,
     required this.label,
     required this.value,
     required this.icon,
@@ -406,32 +563,36 @@ class _SummaryMetric extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return AppCard(
-      padding: const EdgeInsets.all(AppSpacing.lg),
-      child: Row(
-        children: [
-          CircleAvatar(
-            backgroundColor: Theme.of(context).colorScheme.primaryContainer,
-            foregroundColor: Theme.of(context).colorScheme.primary,
-            child: Icon(icon),
-          ),
-          const SizedBox(width: AppSpacing.md),
-          Expanded(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(value, style: Theme.of(context).textTheme.headlineSmall),
-                Text(
-                  label,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-                ),
-              ],
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(24),
+      child: AppCard(
+        padding: const EdgeInsets.all(AppSpacing.lg),
+        child: Row(
+          children: [
+            CircleAvatar(
+              backgroundColor: Theme.of(context).colorScheme.primaryContainer,
+              foregroundColor: Theme.of(context).colorScheme.primary,
+              child: Icon(icon),
             ),
-          ),
-        ],
+            const SizedBox(width: AppSpacing.md),
+            Expanded(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(value, style: Theme.of(context).textTheme.headlineSmall),
+                  Text(
+                    label,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -484,6 +645,7 @@ class _ContentToolbar extends StatelessWidget {
           );
 
           final type = DropdownButtonFormField<ContentType?>(
+            key: ValueKey('type:$typeFilter'),
             isExpanded: true,
             initialValue: typeFilter,
             decoration: const InputDecoration(labelText: 'Content type'),
@@ -503,6 +665,7 @@ class _ContentToolbar extends StatelessWidget {
           );
 
           final status = DropdownButtonFormField<ContentStatus?>(
+            key: ValueKey('status:$statusFilter'),
             isExpanded: true,
             initialValue: statusFilter,
             decoration: const InputDecoration(labelText: 'Status'),
@@ -654,15 +817,30 @@ class _ContentDataTable extends StatelessWidget {
                     DataCell(Text(_shortDate(item.publicationDate))),
                     DataCell(Text(_shortDate(item.reviewDate))),
                     DataCell(
-                      _ContentActions(
-                        item: item,
-                        disabled: disabled,
-                        onEdit: () => onEdit(item),
-                        onPublish: () => onPublish(item),
-                        onArchive: () => onArchive(item),
-                        onDraft: () => onDraft(item),
-                        onVersions: () => onVersions(item),
-                        onDelete: () => onDelete(item),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            tooltip: 'Edit ${item.displayTitle}',
+                            onPressed: disabled ? null : () => onEdit(item),
+                            icon: const Icon(Icons.edit_outlined, size: 19),
+                          ),
+                          IconButton(
+                            tooltip: 'Versions of ${item.displayTitle}',
+                            onPressed: disabled ? null : () => onVersions(item),
+                            icon: const Icon(Icons.history, size: 19),
+                          ),
+                          _ContentActions(
+                            item: item,
+                            disabled: disabled,
+                            onEdit: () => onEdit(item),
+                            onPublish: () => onPublish(item),
+                            onArchive: () => onArchive(item),
+                            onDraft: () => onDraft(item),
+                            onVersions: () => onVersions(item),
+                            onDelete: () => onDelete(item),
+                          ),
+                        ],
                       ),
                     ),
                   ],
@@ -1356,14 +1534,15 @@ class _ContentEditorDialogState extends State<_ContentEditorDialog> {
 
             Padding(
               padding: const EdgeInsets.all(AppSpacing.lg),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.end,
+              child: Wrap(
+                alignment: WrapAlignment.end,
+                spacing: AppSpacing.sm,
+                runSpacing: AppSpacing.sm,
                 children: [
                   TextButton(
                     onPressed: () => Navigator.pop(context),
                     child: const Text('Cancel'),
                   ),
-                  const SizedBox(width: AppSpacing.sm),
                   FilledButton.icon(
                     onPressed: _save,
                     icon: const Icon(Icons.save_outlined),
