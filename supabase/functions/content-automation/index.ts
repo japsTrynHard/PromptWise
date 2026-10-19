@@ -1,10 +1,13 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
+import type { SupabaseClient } from 'npm:@supabase/supabase-js@2';
 import { XMLParser } from 'npm:fast-xml-parser@4.5.3';
 import { classifyRun, queueIsFull, validateLessonDraft } from './quality.mjs';
 import {
-  enforceDraftFocus, resolveFocusTopics, selectCandidateFocus, textSupportsFocus,
-  validateVerificationFocus, enforceVerificationFocus,
+  enforceDraftFocus, resolveFocusTopics, textSupportsFocus, textSupportsVerification,
+  validateVerificationFocus, enforceVerificationFocus, VERIFICATION_FOCUS_SKILLS,
 } from './focus.mjs';
+import { planCandidates, topicResults, topicSummary } from './planning.mjs';
+import { discoverFallback } from './discovery.mjs';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -35,23 +38,6 @@ const UNIVERSAL_KEYWORDS = [
 ];
 
 const MAX_ARTICLE_TEXT = 9000;
-
-const AI_ANCHOR_KEYWORDS = [
-  'artificial intelligence',
-  'generative ai',
-  'ai system',
-  'ai model',
-  'ai-generated',
-  'ai generated',
-  'machine learning',
-  'large language model',
-  'llm',
-  'chatgpt',
-  'chatbot',
-  'prompt engineering',
-  'deepfake',
-  'synthetic media',
-];
 
 type JsonRecord = Record<string, unknown>;
 
@@ -153,6 +139,7 @@ type VerificationGenerationStats = {
   generationFailed: number;
   insertFailed: number;
   failureSamples: string[];
+  topicResults: Array<{ topic: string; created: number; status: string }>;
 };
 
 type GroqRequestBudget = {
@@ -493,7 +480,7 @@ Deno.serve(async (req) => {
         }
 
         const groqBudget: GroqRequestBudget = {
-          remaining: groqRequestRemaining,
+          remaining: Math.min(groqRequestRemaining, Math.max(3, verificationBudget * 2)),
           used: 0,
         };
         const result = await generateVerificationDraftsFromAwareness({
@@ -547,19 +534,20 @@ Deno.serve(async (req) => {
         const message = partial
           ? `Partial verification run: ${result.created} draft${result.created === 1 ? '' : 's'} saved for review, but ${hardFailures} source/generation/save failure${hardFailures === 1 ? '' : 's'} occurred. ${diagnostic} Refresh the draft list.`
           : result.created > 0
-            ? `Verification check completed. ${result.created} fresh AI draft${result.created === 1 ? '' : 's'} created from current Awareness sources for administrator review.`
+            ? `Verification check completed. ${result.created} AI draft${result.created === 1 ? '' : 's'} created from eligible trusted sources for administrator review.`
           : hardFailures > 0
             ? `Verification draft generation could not complete. ${diagnostic}`
             : result.rowsFound === 0
-              ? 'No current Awareness articles are available for Verify draft generation.'
+              ? 'No relevant AI Awareness articles or enabled trusted source pages are available for the selected Verify skills.'
               : result.duplicateSkipped >= result.rowsFound
                 ? 'All current Awareness articles already have a Verify draft or published case.'
                 : 'Verification check completed. No eligible source produced a new draft right now.';
 
         return jsonResponse({
-          message,
-          success: runStatus === 'completed',
-          partial,
+          message: `${message} Topic results: ${topicSummary(result.topicResults)}.`,
+          topicResults: result.topicResults,
+          success: runStatus === 'completed' && result.topicResults.every(item => item.created > 0),
+          partial: result.created > 0 && (partial || result.topicResults.some(item => item.created === 0)),
           runStatus,
           verificationDraftsCreated: result.created,
           articlesFound: result.rowsFound,
@@ -576,7 +564,7 @@ Deno.serve(async (req) => {
           dailyRemaining: Math.max(0, dailyRemaining - result.created),
           monthlyRemaining: Math.max(0, monthlyRemaining - result.created),
           groqRequestsThisMonth: groqMonthCount + groqBudget.used,
-          groqRequestsRemaining: groqBudget.remaining,
+          groqRequestsRemaining: Math.max(0, groqRequestRemaining - groqBudget.used),
           monthlyGroqRequestCap,
           maxDraftsPerRun: maxPerRun,
           monthlyDraftCap: monthlyCap,
@@ -662,18 +650,29 @@ Deno.serve(async (req) => {
         }
       }
 
+      const missingTopics = focusTopics!.filter(topic => !candidates.some(candidate =>
+        textSupportsFocus(`${candidate.title} ${candidate.summary}`, topic)));
+      if (missingTopics.length > 0) {
+        candidates.push(...await discoverFallback({
+          sources, topics: missingTopics, supports: textSupportsFocus,
+          load: (url: string) => fetchText(url, 8000), clean: articleTextFromHtml,
+          aiEligible: isAiAwarenessSource,
+          onFailure: (source: SourceRow, error: unknown) => {
+            sourceFailures += 1;
+            console.warn('Trusted-page fallback failed', source.name, errorMessage(error));
+          },
+        }));
+      }
+
       // Filter BEFORE limiting candidates: unrelated trending AI news must
       // never crowd out sources for the admin-selected curricular skill.
-      const focusedCandidates = dedupeCandidates(candidates)
-        .map((candidate) => ({
-          candidate,
-          focusTopic: selectCandidateFocus(candidate, focusTopics!),
-        }))
-        .filter((entry): entry is { candidate: Candidate; focusTopic: string } =>
-          entry.focusTopic !== null)
-        .sort((a, b) => b.candidate.relevanceScore - a.candidate.relevanceScore)
-        .slice(0, Math.max(1, Number(settings.max_articles_per_run ?? 3) * 3));
-
+      const planningSeed = [...runId].reduce((sum, char) => sum + char.charCodeAt(0), 0);
+      const focusedCandidates = planCandidates(
+        dedupeCandidates(candidates).sort((a, b) => b.relevanceScore - a.relevanceScore),
+        focusTopics!, textSupportsFocus, planningSeed,
+      );
+      const savedByTopic: Record<string, number> = {};
+      const attemptedByTopic: Record<string, number> = {};
 
       let articlesDiscovered = 0;
       let draftsCreated = 0;
@@ -688,11 +687,17 @@ Deno.serve(async (req) => {
         console.log('Groq models available to this project:', groqModels.join(', '));
       }
 
+      const lessonRequestBudget: GroqRequestBudget = {
+        remaining: Math.min(20, Math.max(3, Math.min(draftBudget, maxArticles) * 2)), used: 0,
+      };
+      let candidateAttempts = 0;
       for (const { candidate, focusTopic } of focusedCandidates) {
-        if (articlesDiscovered >= maxArticles || draftsCreated >= draftBudget) {
+        if (lessonRequestBudget.remaining <= 0 || candidateAttempts >= Math.min(30, Math.max(maxArticles * 3, focusTopics!.length)) || draftsCreated >= Math.min(draftBudget, maxArticles)) {
           break;
         }
 
+        candidateAttempts += 1;
+        attemptedByTopic[focusTopic] = (attemptedByTopic[focusTopic] ?? 0) + 1;
         const fingerprint = await sha256(
           `${normalizeUrl(candidate.url)}|${candidate.title.toLowerCase().trim()}`,
         );
@@ -757,6 +762,7 @@ Deno.serve(async (req) => {
             candidate,
             articleText,
             focusTopic,
+            requestBudget: lessonRequestBudget,
           });
           validateDraft(draft);
           enforceDraftFocus(draft, focusTopic);
@@ -818,6 +824,7 @@ Deno.serve(async (req) => {
 
           await markArticle(service, article.id, 'processed');
           draftsCreated += 1;
+          savedByTopic[focusTopic] = (savedByTopic[focusTopic] ?? 0) + 1;
         } catch (error) {
           processingFailures += 1;
           console.error('Article processing failed', candidate.url, error);
@@ -825,6 +832,7 @@ Deno.serve(async (req) => {
         }
       }
 
+      const outcomes: Array<{ topic: string; created: number; status: string }> = topicResults(focusTopics!, focusedCandidates, savedByTopic, attemptedByTopic);
       const failures = processingFailures + sourceFailures;
       const runStatus = classifyRun(draftsCreated, failures);
       const partial = runStatus === 'completed_with_errors';
@@ -852,10 +860,11 @@ Deno.serve(async (req) => {
               : 'No new, non-duplicate source produced a draft for the selected focus areas.';
 
       return jsonResponse({
-        message,
-        ...(runFailed ? { error: message } : {}),
-        success: runStatus === 'completed',
-        partial,
+        message: `${message} Topic results: ${topicSummary(outcomes)}.`,
+        topicResults: outcomes,
+        ...(runFailed ? { error: `${message} Topic results: ${topicSummary(outcomes)}.` } : {}),
+        success: runStatus === 'completed' && outcomes.every(item => item.created > 0),
+        partial: draftsCreated > 0 && (partial || outcomes.some(item => item.created === 0)),
         runStatus,
         sourcesChecked,
         sourceFailures,
@@ -865,6 +874,7 @@ Deno.serve(async (req) => {
         verificationDraftsCreated,
         focusTopics,
         matchingCandidates: focusedCandidates.length,
+        groqRequestsUsed: lessonRequestBudget.used,
       }, runFailed ? 502 : 200);
     } catch (error) {
       await completeRun(service, runId, {
@@ -899,7 +909,7 @@ function requireEnv(name: string): string {
 
 async function requireAdmin(
   req: Request,
-  service: ReturnType<typeof createClient>,
+  service: SupabaseClient,
 ): Promise<void> {
   const authHeader = req.headers.get('authorization') ?? '';
   const token = authHeader.replace(/^Bearer\s+/i, '').trim();
@@ -922,7 +932,7 @@ async function requireAdmin(
 
 async function requireScheduledSecret(
   req: Request,
-  service: ReturnType<typeof createClient>,
+  service: SupabaseClient,
 ): Promise<void> {
   const { data: scheduler, error } = await service
     .from('automation_scheduler_config')
@@ -1060,9 +1070,7 @@ function relevanceFor(
   // Phase 7 automation is specifically for AI-literacy updates. Generic
   // privacy/scam/source articles must not pass unless the title/summary also
   // contains a clear AI-related anchor.
-  const hasAiAnchor = AI_ANCHOR_KEYWORDS.some((keyword) =>
-    text.includes(keyword),
-  );
+  const hasAiAnchor = isAiAwarenessSource(input);
   if (!hasAiAnchor) return { score: 0, topic: null };
 
   let hits = 0;
@@ -1108,7 +1116,10 @@ function hitsFor(text: string, words: string[]): number {
 }
 
 async function fetchArticleText(url: string): Promise<string> {
-  const html = await fetchText(url);
+  return articleTextFromHtml(await fetchText(url));
+}
+
+function articleTextFromHtml(html: string): string {
   const withoutNoise = html
     .replace(/<script\b[\s\S]*?<\/script>/gi, ' ')
     .replace(/<style\b[\s\S]*?<\/style>/gi, ' ')
@@ -1120,9 +1131,9 @@ async function fetchArticleText(url: string): Promise<string> {
     .slice(0, MAX_ARTICLE_TEXT);
 }
 
-async function fetchText(url: string): Promise<string> {
+async function fetchText(url: string, timeoutMs = 15000): Promise<string> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 15000);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch(url, {
       signal: controller.signal,
@@ -1207,7 +1218,7 @@ async function generateVerificationDraftsFromAwareness({
   groqBudget,
   focusSkills,
 }: {
-  service: ReturnType<typeof createClient>;
+  service: SupabaseClient;
   apiKey: string;
   maxDrafts: number;
   maxArticles: number;
@@ -1226,10 +1237,10 @@ async function generateVerificationDraftsFromAwareness({
     generationFailed: 0,
     insertFailed: 0,
     failureSamples: [],
+    topicResults: [],
   };
   if (maxDrafts <= 0) return stats;
 
-  const cutoff = new Date(Date.now() - 21 * 86_400_000).toISOString();
   const { data: rows, error } = await service
     .from('awareness_articles')
     .select(
@@ -1237,19 +1248,60 @@ async function generateVerificationDraftsFromAwareness({
     )
     .eq('is_active', true)
     .gte('ai_relevance_score', 4)
-    .gte('discovered_at', cutoff)
     .order('relevance_score', { ascending: false })
     .order('published_at', { ascending: false })
-    .limit(Math.max(1, Math.min(24, maxArticles)));
+    .limit(96);
   if (error) throw error;
 
-  stats.rowsFound = (rows ?? []).length;
-  if (stats.rowsFound === 0) return stats;
-
-  const models = await resolveGroqModels(apiKey);
-
-  for (const raw of rows ?? []) {
-    if (stats.created >= maxDrafts || groqBudget.remaining <= 0) break;
+  const skills = focusSkills ?? [...VERIFICATION_FOCUS_SKILLS];
+  const candidates = (rows ?? []).map(raw => {
+    const row = asRecord(raw);
+    return { ...row, url: textValue(row.source_url), title: textValue(row.title), summary: textValue(row.summary) };
+  });
+  const missingSkills = skills.filter(skill => !candidates.some(candidate =>
+    textSupportsVerification(`${candidate.title} ${candidate.summary}`, skill)));
+  if (missingSkills.length > 0) {
+    const { data: trustedSources, error: sourceError } = await service.from('content_sources')
+      .select('id,name,source_url,trust_level').eq('enabled', true)
+      .order('trust_level', { ascending: false }).limit(4);
+    if (sourceError) {
+      stats.sourceFetchFailed += 1;
+      pushFailureSample(stats, errorMessage(sourceError));
+    } else {
+      const fallback = await discoverFallback({
+        sources: trustedSources ?? [], topics: missingSkills, supports: textSupportsVerification,
+        load: (url: string) => fetchText(url, 8000), clean: articleTextFromHtml,
+        aiEligible: isAiAwarenessSource,
+        onFailure: (source: SourceRow, error: unknown) => {
+          stats.sourceFetchFailed += 1;
+          pushFailureSample(stats, `${source.name}: ${errorMessage(error)}`);
+        },
+      });
+      for (const candidate of fallback) candidates.push({
+        ...candidate, id: null, source_url: candidate.url, source_name: candidate.sourceName,
+        ai_relevance_score: 4, content_excerpt: candidate.summary,
+      });
+    }
+  }
+  stats.rowsFound = candidates.length;
+  const seed = Date.now();
+  const plan = planCandidates(candidates, skills, textSupportsVerification, seed);
+  const models = plan.length > 0 ? await resolveGroqModels(apiKey) : [];
+  const saved: Record<string, number> = {};
+  const attempted: Record<string, number> = {};
+  const finish = () => {
+    // Older/scheduled callers have no explicit coverage request. Preserve
+    // automatic skill choice without claiming they selected every skill.
+    const reportedSkills = focusSkills ?? (Object.keys(saved).length ? Object.keys(saved) : skills);
+    stats.topicResults = topicResults(reportedSkills, plan, saved, attempted);
+    return stats;
+  };
+  let attempts = 0;
+  for (const { candidate: raw, focusTopic } of plan) {
+    if (stats.created >= maxDrafts || groqBudget.remaining <= 0 ||
+        attempts >= Math.min(30, Math.max(maxArticles, skills.length))) break;
+    attempts += 1;
+    attempted[focusTopic] = (attempted[focusTopic] ?? 0) + 1;
     const row = asRecord(raw);
     const sourceUrl = textValue(row.source_url).trim();
     const title = textValue(row.title).trim();
@@ -1314,6 +1366,11 @@ async function generateVerificationDraftsFromAwareness({
       topicHint: 'verification',
     };
 
+    if (!textSupportsVerification(articleText, focusTopic)) {
+      stats.tooShort += 1;
+      pushFailureSample(stats, `Source text cannot support ${focusTopic}: ${sourceUrl}`);
+      continue;
+    }
     let verificationCase: GeneratedVerificationCase;
     try {
       verificationCase = await generateVerificationCaseOnly({
@@ -1325,9 +1382,10 @@ async function generateVerificationDraftsFromAwareness({
         articleText,
         category: textValue(row.category),
         region: textValue(row.region),
-        focusSkill: focusSkills?.[stats.created % focusSkills.length],
+        focusSkill: focusTopic,
       });
       validateVerificationCaseDraft(verificationCase);
+      enforceVerificationFocus(verificationCase, focusTopic);
     } catch (draftError) {
       stats.generationFailed += 1;
       pushFailureSample(
@@ -1364,9 +1422,10 @@ async function generateVerificationDraftsFromAwareness({
     }
 
     stats.created += 1;
+    saved[focusTopic] = (saved[focusTopic] ?? 0) + 1;
   }
 
-  return stats;
+  return finish();
 }
 
 function aiAwarenessSourceScore(input: string): number {
@@ -1465,7 +1524,7 @@ async function generateVerificationCaseOnly({
   region,
   focusSkill,
 }: {
-  service: ReturnType<typeof createClient>;
+  service: SupabaseClient;
   apiKey: string;
   models: string[];
   groqBudget: GroqRequestBudget;
@@ -1541,6 +1600,8 @@ Region: ${region || 'Global'}
 Trusted source: ${candidate.sourceName}
 Source URL: ${candidate.url}
 Source title: ${candidate.title}
+Source publication date: ${candidate.publishedAt ?? "Unknown; do not assume current"}
+Do not describe historical events as current news.
 Source summary: ${candidate.summary}
 
 SOURCE MATERIAL:
@@ -1650,12 +1711,14 @@ async function generateDraft({
   candidate,
   articleText,
   focusTopic,
+  requestBudget,
 }: {
   apiKey: string;
   models: string[];
   candidate: Candidate;
   articleText: string;
   focusTopic: string;
+  requestBudget: GroqRequestBudget;
 }): Promise<GeneratedDraftPayload> {
   const basePrompt = `You are the curriculum drafting engine for PromptWise, an AI-literacy learning system.
 
@@ -1747,6 +1810,8 @@ When non-null, verification_case must have exactly this shape:
 Trusted source: ${candidate.sourceName}
 Source URL: ${candidate.url}
 Source title: ${candidate.title}
+Source publication date: ${candidate.publishedAt ?? "Unknown; do not assume current"}
+Do not describe historical events as current news.
 Possible topic hint: ${candidate.topicHint ?? 'none'}
 
 SOURCE MATERIAL:
@@ -1754,7 +1819,10 @@ ${articleText}`;
 
   const failures: string[] = [];
 
-  for (const model of models) {
+  for (const model of models.slice(0, 3)) {
+    if (requestBudget.remaining <= 0) throw new Error('Per-run AI request limit reached.');
+    requestBudget.remaining -= 1;
+    requestBudget.used += 1;
     const prompt = failures.length === 0
       ? basePrompt
       : `${basePrompt}
@@ -1919,7 +1987,7 @@ function validateVerificationCaseDraft(value: GeneratedVerificationCase): void {
 }
 
 async function markArticle(
-  service: ReturnType<typeof createClient>,
+  service: SupabaseClient,
   articleId: string,
   status: 'processed' | 'ignored' | 'failed',
 ): Promise<void> {
@@ -1930,7 +1998,7 @@ async function markArticle(
 }
 
 async function completeRun(
-  service: ReturnType<typeof createClient>,
+  service: SupabaseClient,
   runId: string,
   values: {
     status: 'completed' | 'completed_with_errors' | 'failed' | 'skipped';

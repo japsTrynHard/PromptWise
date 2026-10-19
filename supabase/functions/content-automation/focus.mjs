@@ -52,9 +52,11 @@ const SIGNALS = Object.freeze({
   prompt_clarity: [/\bprompts?\b/i, /\bprompt engineering\b/i, /\bclear instructions?\b/i,
     /\bambiguous instructions?\b/i],
   context: [/\bcontext\b/i, /\bbackground information\b/i, /\baudience\b/i,
-    /\bcontextual (?:information|details|prompt)\b/i],
+    /\bcontextual (?:information|details|prompt)\b/i, /\bbackground knowledge\b/i,
+    /\btarget (?:reader|user)s?\b/i, /\brelevant (?:details|information)\b/i],
   specificity: [/\bspecificity\b/i, /\bspecific (?:instructions?|prompts?|requirements?)\b/i,
-    /\bconstraints?\b/i, /\boutput formats?\b/i, /\bprecise instructions?\b/i],
+    /\bconstraints?\b/i, /\boutput formats?\b/i, /\bprecise instructions?\b/i,
+    /\bstructured outputs?\b/i, /\bresponse format\b/i, /\bacceptance criteria\b/i],
   responsible_use: [/\bprivacy\b/i, /\bpersonal data\b/i, /\bbias\b/i,
     /\bfairness\b/i, /\bacademic integrity\b/i, /\bresponsible (?:ai|use)\b/i,
     /\bai safety\b/i, /\bethical (?:ai|use)\b/i],
@@ -63,6 +65,22 @@ const SIGNALS = Object.freeze({
     /\bhallucinations?\b/i, /\bsource (?:credibility|verification)\b/i,
     /\bevidence (?:quality|checking)\b/i],
 });
+
+const VERIFICATION_SIGNALS = Object.freeze({
+  source_verification: [/\bsource (?:verification|credibility|reliability|authenticity)\b/i,
+    /\bcheck(?:ing)? (?:the )?sources?\b/i, /\b(?:original|trusted|reliable) sources?\b/i,
+    /\bcredib(?:le|ility)\b/i, /\bauthenticity\b/i, /\bauthorship\b/i],
+  claim_verification: [/\bclaims?\b/i, /\bfact[ -]?check/i, /\bmisinformation\b/i, /\bhallucinations?\b/i],
+  media_provenance: [/\b(?:images?|videos?|audio|media|deepfakes?|provenance|watermarks?)\b/i],
+  manipulation_detection: [/\b(?:manipulat\w*|deepfakes?|synthetic|edited|altered|ai-generated)\b/i],
+  citation_verification: [/\b(?:citations?|references?|bibliograph\w*|cited)\b/i],
+  uncertainty_judgment: [/\b(?:uncertain\w*|unverified|evidence|confidence|limitations?|unknown)\b/i],
+});
+
+export function textSupportsVerification(text, skill) {
+  return typeof text === 'string' &&
+    (VERIFICATION_SIGNALS[skill]?.some(pattern => pattern.test(text)) ?? false);
+}
 
 export function textSupportsFocus(text, focusTopic) {
   if (typeof text !== 'string' || !VALID_TOPICS.has(focusTopic)) return false;
