@@ -6,8 +6,13 @@ import 'app_card.dart';
 /// Indeterminate activity only: the server does not report percentage progress.
 class StudioGenerationProgress extends StatelessWidget {
   final bool checkingSources;
+  final String? message;
 
-  const StudioGenerationProgress({super.key, this.checkingSources = false});
+  const StudioGenerationProgress({
+    super.key,
+    this.checkingSources = false,
+    this.message,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -30,8 +35,9 @@ class StudioGenerationProgress extends StatelessWidget {
               style: Theme.of(context).textTheme.titleSmall,
             ),
             const SizedBox(height: 4),
-            const Text(
-              'Please keep this page open. Drafts will appear when the run finishes.',
+            Text(
+              message ??
+                  'Please keep this page open. Drafts will appear when the run finishes.',
             ),
             const SizedBox(height: AppSpacing.sm),
             const LinearProgressIndicator(

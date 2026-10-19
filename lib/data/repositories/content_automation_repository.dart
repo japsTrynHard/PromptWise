@@ -8,10 +8,28 @@ class PartialGenerationException extends StateError {
   PartialGenerationException(super.message);
 }
 
+class _DeferredLearningGeneration extends StateError {
+  final List<String> topics;
+  final int retryAfterSeconds;
+  final bool hasSavedDrafts;
+  final int newDrafts;
+  _DeferredLearningGeneration(
+    super.message,
+    this.topics,
+    this.retryAfterSeconds,
+    this.hasSavedDrafts,
+    this.newDrafts,
+  );
+}
+
 class ContentAutomationRepository {
   final SupabaseClient _client;
+  final Future<void> Function(Duration) _wait;
 
-  const ContentAutomationRepository(this._client);
+  const ContentAutomationRepository(
+    this._client, {
+    Future<void> Function(Duration) wait = Future<void>.delayed,
+  }) : _wait = wait;
 
   Future<List<ContentSource>> fetchSources() async {
     final response = await _client
@@ -139,18 +157,59 @@ class ContentAutomationRepository {
     return QueueLifecycleStats.empty();
   }
 
-  Future<String> runAutomationNow(List<LearningTopic> focusTopics) async {
+  Future<String> runAutomationNow(
+    List<LearningTopic> focusTopics, {
+    void Function(String)? onProgress,
+    bool Function()? shouldContinue,
+  }) async {
     if (focusTopics.isEmpty) {
       throw StateError('Choose at least one focus area for Generate Now.');
     }
 
-    return _invokeAutomation(
-      body: {
-        'mode': 'manual',
-        'focus_topics': focusTopics.map((topic) => topic.id).toList(),
-      },
-      failureMessage: 'Content automation could not be started.',
-    );
+    var pending = focusTopics.map((topic) => topic.id).toSet();
+    var savedAny = false;
+    var noProgress = 0;
+    final maxAttempts = (focusTopics.length + 1).clamp(3, 6);
+    for (var attempt = 0; attempt < maxAttempts; attempt++) {
+      if (shouldContinue != null && !shouldContinue()) {
+        throw StateError(
+          'Learning generation was cancelled because the administrator session changed.',
+        );
+      }
+      try {
+        final message = await _invokeAutomation(
+          body: {'mode': 'manual', 'focus_topics': pending.toList()},
+          failureMessage: 'Content automation could not be started.',
+          allowNoNewContent: attempt == 0,
+        );
+        return attempt == 0
+            ? message
+            : 'Selected topics finished after waiting for the AI provider. Review the draft list. $message';
+      } on _DeferredLearningGeneration catch (error) {
+        savedAny = savedAny || error.hasSavedDrafts;
+        noProgress = error.newDrafts > 0 ? 0 : noProgress + 1;
+        final next = error.topics.toSet();
+        if (attempt == maxAttempts - 1 ||
+            noProgress >= 3 ||
+            next.isEmpty ||
+            !pending.containsAll(next)) {
+          if (savedAny) throw PartialGenerationException(error.message);
+          throw StateError(error.message);
+        }
+        pending = next;
+        onProgress?.call(
+          'AI provider is busy. Retrying ${pending.length} remaining topic(s) in ${error.retryAfterSeconds} seconds. Saved drafts are kept.',
+        );
+        await _wait(Duration(seconds: error.retryAfterSeconds));
+        onProgress?.call('Generating ${pending.length} remaining topic(s)...');
+      } on StateError catch (error) {
+        if (savedAny && error is! PartialGenerationException) {
+          throw PartialGenerationException(error.message);
+        }
+        rethrow;
+      }
+    }
+    throw StateError('Learning generation could not finish.');
   }
 
   Future<String> runVerificationDraftsNow({
@@ -170,6 +229,7 @@ class ContentAutomationRepository {
   Future<String> _invokeAutomation({
     required Map<String, dynamic> body,
     required String failureMessage,
+    bool allowNoNewContent = true,
   }) async {
     try {
       final response = await _client.functions.invoke(
@@ -180,7 +240,36 @@ class ContentAutomationRepository {
       if (response.status < 200 || response.status >= 300 || data is! Map) {
         throw StateError(_responseMessage(data, failureMessage));
       }
+      if (body['target'] != 'verification' &&
+          data['retryable'] == true &&
+          data['pendingTopics'] is List &&
+          data['retryAfterSeconds'] is num) {
+        final seconds = (data['retryAfterSeconds'] as num).toInt();
+        if (seconds > 0 && seconds <= 90) {
+          throw _DeferredLearningGeneration(
+            _responseMessage(data, failureMessage),
+            (data['pendingTopics'] as List).whereType<String>().toList(),
+            seconds,
+            (data['draftsCreated'] is num && data['draftsCreated'] > 0) ||
+                (data['existingDraftsAvailable'] is num &&
+                    data['existingDraftsAvailable'] > 0),
+            data['draftsCreated'] is num
+                ? (data['draftsCreated'] as num).toInt()
+                : 0,
+          );
+        }
+      }
       // Partial runs saved real drafts; retain an explicit warning outcome.
+      if (body['target'] != 'verification' &&
+          data['noNewContent'] == true &&
+          data['error'] == null &&
+          data['draftsCreated'] == 0 &&
+          allowNoNewContent) {
+        return _responseMessage(
+          data,
+          'No new lesson draft was needed or available.',
+        );
+      }
       if (data['partial'] == true) {
         var message = _responseMessage(data, failureMessage);
         final saved = body['target'] == 'verification'

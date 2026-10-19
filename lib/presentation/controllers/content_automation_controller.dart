@@ -23,6 +23,8 @@ class ContentAutomationController extends ChangeNotifier {
   String? _successMessage;
   String? _warningMessage;
   String? _generationScope;
+  String? _generationProgressMessage;
+  String? get generationProgressMessage => _generationProgressMessage;
   String? get warningMessage => _warningMessage;
   String? get generationScope => _generationScope;
   List<ContentSource> _sources = const [];
@@ -259,6 +261,12 @@ class ContentAutomationController extends ChangeNotifier {
       try {
         final message = await _requireRepository().runAutomationNow(
           focusTopics,
+          shouldContinue: isCurrent,
+          onProgress: (message) {
+            if (!isCurrent()) return;
+            _generationProgressMessage = message;
+            notifyListeners();
+          },
         );
         if (!isCurrent()) return;
         _successMessage = message;
@@ -341,6 +349,7 @@ class ContentAutomationController extends ChangeNotifier {
     if (_isMutating || !_isAdministrator || _repository == null) return false;
     final epoch = _adminEpoch;
     _generationScope = scope;
+    _generationProgressMessage = null;
     _isMutating = true;
     _errorMessage = null;
     _successMessage = null;
@@ -365,6 +374,7 @@ class ContentAutomationController extends ChangeNotifier {
     } finally {
       if (_isCurrentAdmin(epoch)) {
         _isMutating = false;
+        _generationProgressMessage = null;
         notifyListeners();
       }
     }

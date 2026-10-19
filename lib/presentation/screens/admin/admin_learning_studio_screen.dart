@@ -538,7 +538,9 @@ class _AutomationCard extends StatelessWidget {
           ),
           if (generating) ...[
             const SizedBox(height: AppSpacing.md),
-            const StudioGenerationProgress(),
+            StudioGenerationProgress(
+              message: controller.generationProgressMessage,
+            ),
           ],
           const SizedBox(height: AppSpacing.md),
           ExpansionTile(

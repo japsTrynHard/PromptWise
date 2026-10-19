@@ -497,7 +497,11 @@ class _AutomationRepository implements ContentAutomationRepository {
   Future<QueueLifecycleStats> fetchQueueHealth() async =>
       QueueLifecycleStats.empty();
   @override
-  Future<String> runAutomationNow(List<LearningTopic> focusTopics) async {
+  Future<String> runAutomationNow(
+    List<LearningTopic> focusTopics, {
+    void Function(String)? onProgress,
+    bool Function()? shouldContinue,
+  }) async {
     requestedTopics = focusTopics;
     if (runError != null) throw runError!;
     return 'Draft created for review.';

@@ -59,6 +59,216 @@ void main() {
   });
 
   test(
+    'one Learning action finishes all five topics even when only one can be saved per provider window',
+    () async {
+      final sizes = <int>[];
+      var waits = 0;
+      final client = clientFor((request) async {
+        final topics = List<String>.from(
+          jsonDecode(request.body)['focus_topics'],
+        );
+        sizes.add(topics.length);
+        if (topics.length == 1) {
+          return jsonResponse({
+            'success': true,
+            'draftsCreated': 1,
+            'message': 'Last draft saved.',
+          }, 200);
+        }
+        return jsonResponse({
+          'success': false,
+          'retryable': true,
+          'partial': true,
+          'draftsCreated': 1,
+          'pendingTopics': topics.skip(1).toList(),
+          'retryAfterSeconds': 1,
+          'message': 'One saved; waiting for the provider.',
+        }, 202);
+      });
+      final result = await ContentAutomationRepository(
+        client,
+        wait: (_) async {
+          waits++;
+        },
+      ).runAutomationNow(LearningTopic.values);
+      expect(sizes, [5, 4, 3, 2, 1]);
+      expect(waits, 4);
+      expect(result, contains('finished after waiting'));
+    },
+  );
+
+  test(
+    'Learning waits and retries only pending selected topics after a partial provider limit',
+    () async {
+      final requests = <List<dynamic>>[];
+      final waits = <Duration>[];
+      final progress = <String>[];
+      final client = clientFor((request) async {
+        requests.add(
+          List<dynamic>.from(jsonDecode(request.body)['focus_topics']),
+        );
+        if (requests.length == 1) {
+          return jsonResponse({
+            'success': false,
+            'retryable': true,
+            'partial': true,
+            'draftsCreated': 3,
+            'pendingTopics': ['responsible_use', 'verification'],
+            'retryAfterSeconds': 30,
+            'message': '3 drafts saved; provider is busy.',
+          }, 202);
+        }
+        return jsonResponse({
+          'success': true,
+          'draftsCreated': 2,
+          'message': '2 remaining drafts saved.',
+        }, 200);
+      });
+      final result = await ContentAutomationRepository(
+        client,
+        wait: (duration) async {
+          waits.add(duration);
+        },
+      ).runAutomationNow(LearningTopic.values, onProgress: progress.add);
+      expect(requests.first.length, 5);
+      expect(requests.last, ['responsible_use', 'verification']);
+      expect(waits, [const Duration(seconds: 30)]);
+      expect(progress.first, contains('2 remaining'));
+      expect(result, contains('finished after waiting'));
+    },
+  );
+
+  test(
+    'Learning automatic continuation is bounded and never claims drafts were saved when none exist',
+    () async {
+      var calls = 0;
+      var waits = 0;
+      final client = clientFor((request) async {
+        calls++;
+        return jsonResponse({
+          'success': false,
+          'retryable': true,
+          'draftsCreated': 0,
+          'pendingTopics': ['context'],
+          'retryAfterSeconds': 1,
+          'error': 'AI provider rate limit.',
+        }, 202);
+      });
+      await expectLater(
+        ContentAutomationRepository(
+          client,
+          wait: (_) async {
+            waits++;
+          },
+        ).runAutomationNow([LearningTopic.context]),
+        throwsA(
+          isA<StateError>().having(
+            (error) => error is PartialGenerationException,
+            'must not claim partial saves',
+            false,
+          ),
+        ),
+      );
+      expect(calls, 3);
+      expect(waits, 2);
+    },
+  );
+
+  test(
+    'Learning stops automatic continuation when the administrator session changes',
+    () async {
+      var current = true;
+      var calls = 0;
+      final client = clientFor((request) async {
+        calls++;
+        return jsonResponse({
+          'success': false,
+          'retryable': true,
+          'draftsCreated': 0,
+          'pendingTopics': ['context'],
+          'retryAfterSeconds': 1,
+          'message': 'Provider busy.',
+        }, 202);
+      });
+      await expectLater(
+        ContentAutomationRepository(
+          client,
+          wait: (_) async {
+            current = false;
+          },
+        ).runAutomationNow([
+          LearningTopic.context,
+        ], shouldContinue: () => current),
+        throwsStateError,
+      );
+      expect(calls, 1);
+    },
+  );
+
+  test(
+    'Learning refuses automatic retries for topics outside the original selection',
+    () async {
+      var calls = 0;
+      final client = clientFor((request) async {
+        calls++;
+        return jsonResponse({
+          'success': false,
+          'retryable': true,
+          'draftsCreated': 0,
+          'pendingTopics': ['verification'],
+          'retryAfterSeconds': 1,
+          'error': 'Provider busy.',
+        }, 202);
+      });
+      await expectLater(
+        ContentAutomationRepository(
+          client,
+          wait: (_) async {
+            fail('must not wait');
+          },
+        ).runAutomationNow([LearningTopic.context]),
+        throwsStateError,
+      );
+      expect(calls, 1);
+    },
+  );
+
+  test(
+    'existing Learning drafts are a normal availability result with no automatic retry',
+    () async {
+      final client = clientFor(
+        (request) async => jsonResponse({
+          'success': true,
+          'draftsCreated': 0,
+          'existingDraftsAvailable': 1,
+          'message': 'Existing lesson draft is ready for review.',
+        }, 200),
+      );
+      expect(
+        await ContentAutomationRepository(
+          client,
+        ).runAutomationNow([LearningTopic.responsibleUse]),
+        contains('ready for review'),
+      );
+      final usedSource = clientFor(
+        (request) async => jsonResponse({
+          'success': false,
+          'noNewContent': true,
+          'draftsCreated': 0,
+          'message':
+              'All matching sources already have approved lessons. No new AI request was charged.',
+        }, 200),
+      );
+      expect(
+        await ContentAutomationRepository(
+          usedSource,
+        ).runAutomationNow([LearningTopic.responsibleUse]),
+        contains('already have approved lessons'),
+      );
+    },
+  );
+
+  test(
     'Verify sends unlimited policy and zero cooldown to the settings RPC',
     () async {
       final client = clientFor((request) async {

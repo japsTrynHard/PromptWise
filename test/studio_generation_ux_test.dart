@@ -189,7 +189,10 @@ void main() {
     ) async {
       _viewport(tester, 1280);
       final pending = Completer<void>();
-      final automation = _Automation(pending: pending);
+      final automation = _Automation(
+        pending: pending,
+        waitingMessage: 'AI provider is busy. Retrying remaining topics.',
+      );
       final studio = _Verification();
       final awareness = _Awareness();
       addTearDown(automation.dispose);
@@ -207,6 +210,12 @@ void main() {
       await tester.pump(const Duration(milliseconds: 300));
       expect(find.byType(StudioGenerationSpinner), findsOneWidget);
       expect(find.byType(StudioGenerationProgress), findsOneWidget);
+      if (!verify) {
+        expect(
+          find.text('AI provider is busy. Retrying remaining topics.'),
+          findsOneWidget,
+        );
+      }
       expect(
         tester
             .widget<FilledButton>(
@@ -516,6 +525,9 @@ Future<void> _preview(WidgetTester tester, String name) async {
 }
 
 class _Automation extends ContentAutomationController {
+  final String? waitingMessage;
+  @override
+  String? get generationProgressMessage => waitingMessage;
   final Completer<void>? pending;
   String? activeScope;
   bool running = false;
@@ -554,6 +566,7 @@ class _Automation extends ContentAutomationController {
   final int draftCount;
   final int bankCount;
   _Automation({
+    this.waitingMessage,
     this.pending,
     this.cooldown = false,
     this.draftCount = 0,

@@ -56,7 +56,7 @@ function verification(skill) {
 function harness({ topics = FOCUS_TOPICS, verify = false, cap = 10, failTopic,
   missing = false, fallback = false, duplicate = false, invalid = false, saveFails = false,
   httpStatus, timeout = false, wrongBody = false, missingTopic, brokenFeed = false,
-  omitSelection = false, cooldownMinutes = 30, lastManualRunAt = null, articleInsertRace = false, dailyCap = 50, extraCandidate = false, sharedSource = false, pageSource = false, shortSections = false, repairFails = false, repairWrongIndex = false, unlimited = false, usage = 0, recentSuccess = false, tokenCeiling = 4096, firstModelTimeout = false, advanceAfterFirstDraft = false, articleSaveFails = false,
+  omitSelection = false, cooldownMinutes = 30, lastManualRunAt = null, duplicateStatus = 'draft', jsonFailureModel = null, repairRateLimitedModel = null, articleInsertRace = false, dailyCap = 50, extraCandidate = false, sharedSource = false, pageSource = false, shortSections = false, repairFails = false, repairWrongIndex = false, unlimited = false, usage = 0, recentSuccess = false, tokenCeiling = 4096, firstModelTimeout = false, advanceAfterFirstDraft = false, articleSaveFails = false,
   modelIds = ['fixture-model'], rateLimitedModels = [] } = {}) {
   const all = verify ? VERIFICATION_FOCUS_SKILLS : FOCUS_TOPICS;
   const signals = verify ? verifySignals : learningSignals;
@@ -77,6 +77,7 @@ function harness({ topics = FOCUS_TOPICS, verify = false, cap = 10, failTopic,
   class Query {
     constructor(table) { this.table = table; this.kind = 'read'; }
     select(_, options) { this.head = options?.head; return this; }
+    in(key,value) { this.filters ??= {}; this.filters[key]=value; return this; }
     eq(key,value) { this.filters ??= {}; this.filters[key]=value; return this; } neq() { return this; } gte() { return this; }
     order() { return this; } limit() { return this; } or() { return this; }
     insert(value) { this.kind = 'insert'; this.value = value; return this; }
@@ -97,7 +98,7 @@ function harness({ topics = FOCUS_TOPICS, verify = false, cap = 10, failTopic,
         if (this.table === 'awareness_articles') result.data = fallback ? [] : rows;
         if (this.table === 'verification_case_drafts') result.data = duplicate ? [{id:'duplicate'}] : [];
         if (this.table === 'discovered_articles') result.data = articleInsertRace ? (this.filters?.article_url ? {id:'saved-1',status:'processed'} : null) : duplicate ? {id:'duplicate',status:'processed'} : sharedSource && inserts.some(i=>i.table==='discovered_articles') ? {id:'saved-1',status:'processed'} : null;
-        if (this.table === 'generated_content_drafts') result.data = duplicate ? [{id:'duplicate'}] : inserts.filter(i=>i.table===this.table && i.value.topic_id===this.filters?.topic_id).map(()=>({id:'existing'}));
+        if (this.table === 'generated_content_drafts') result.data = duplicate ? (this.filters?.status==='draft' && duplicateStatus!=='draft' ? [] : [{id:'duplicate',topic_id:topics[0],status:duplicateStatus}]) : inserts.filter(i=>i.table===this.table && (Array.isArray(this.filters?.topic_id) ? this.filters.topic_id.includes(i.value.topic_id) : i.value.topic_id===this.filters?.topic_id)).map(i=>({id:'existing',topic_id:i.value.topic_id,status:'draft'}));
       }
       return Promise.resolve(result).then(resolve, reject);
     }
@@ -117,6 +118,8 @@ function harness({ topics = FOCUS_TOPICS, verify = false, cap = 10, failTopic,
       const model = JSON.parse(options.body).model;
       modelCalls.push(model);
       if (firstModelTimeout && modelCalls.length === 1) throw Error('Fixture first-model timeout');
+      if(model===jsonFailureModel && !prompt.includes('REPAIR SHORT LESSON SECTIONS')) return Response.json({error:{code:'json_validate_failed',message:'Failed to generate JSON.',failed_generation:"I cannot comply with that request."}},{status:400});
+      if(model===repairRateLimitedModel && prompt.includes('REPAIR SHORT LESSON SECTIONS')) return new Response('Rate limit reached for model '+model,{status:429});
       if (rateLimitedModels.includes(model)) return new Response('Model rate limited', {status:429});
       const topic = prompt.match(/ADMIN-SELECTED (?:FOCUS AREA \(MANDATORY\)|SKILL \(MANDATORY\)):\s*(\w+)/)?.[1];
       calls.push(topic);
@@ -145,14 +148,14 @@ function harness({ topics = FOCUS_TOPICS, verify = false, cap = 10, failTopic,
     return new Response(row && !wrongBody ? `<article>${row.summary}</article>`
       : `<article>${body('AI general market news')}</article>`);
   };
-  return { inserts, calls, updates, modelCalls, async run() {
+  return { inserts, calls, updates, modelCalls, async run(selectedTopics = topics) {
     const realNow = Date.now;
     Date.now = () => realNow() + clockOffset;
     try {
     const response = await handler(new Request('https://fixture.invalid/function', { method:'POST',
       headers:{authorization:'Bearer fixture','content-type':'application/json'},
       body: JSON.stringify({mode:'manual', ...(verify ? {target:'verification',
-        ...(!omitSelection ? {focus_skills:topics} : {})} : {focus_topics:topics})}) }));
+        ...(!omitSelection ? {focus_skills:topics} : {})} : {focus_topics:selectedTopics})}) }));
     return { response, data: await response.json(), drafts: inserts.filter(item => item.table ===
       (verify ? 'verification_case_drafts' : 'generated_content_drafts')) };
     } finally { Date.now = realNow; }
@@ -189,7 +192,7 @@ for (const verify of [false, true]) {
     test(`${verify ? 'Verify' : 'Learning'} ${option} cannot report generation success`, async () => {
       const h = harness({verify,topics:[topics[0]],[option]:true});
       const {data,drafts} = await h.run();
-      assert.equal(drafts.length,0); assert.equal(data.success,false);
+      assert.equal(drafts.length,0); assert.equal(data.success,!verify && option==='duplicate');
       assert.equal(data.topicResults.length,1);
       if (option === 'duplicate' || option === 'missing') assert.equal(h.calls.length,0);
     });
@@ -286,7 +289,7 @@ for (const cooldownMinutes of [0, 2, 30]) {
       assert.equal(first.drafts.length, 1);
       const second = await h.run();
       assert.equal(second.response.status, 200);
-      assert.equal(h.calls.length, 2);
+      assert.equal(h.calls.length, 1);
     } else {
       assert.equal(first.response.status, 429);
       assert.match(first.data.error, /cooldown/);
@@ -387,4 +390,58 @@ test('parallel Learning topics recover a shared-source unique insert race',async
   })();
   assert.equal(drafts.length,5,JSON.stringify(data));
   assert.equal(inserts.filter(i=>i.table==='discovered_articles').length,1);
+});
+
+test('screenshot JSON failure followed by repair 429 preserves the lesson and repairs with another model',async()=>{
+  const h=harness({topics:['responsible_use'],shortSections:true,modelIds:['openai/gpt-oss-20b','openai/gpt-oss-120b'],
+    jsonFailureModel:'openai/gpt-oss-20b',repairRateLimitedModel:'openai/gpt-oss-120b'});
+  const {data,drafts}=await h.run();
+  assert.equal(drafts.length,1,JSON.stringify(data));assert.equal(data.success,true);
+  assert.equal(h.modelCalls.length,4);
+});
+for(let mask=1;mask<32;mask++) test('Learning accepts topic combination '+mask+' of 31',async()=>{
+  const topics=FOCUS_TOPICS.filter((_,i)=>mask & (1<<i));
+  const {data,drafts}=await harness({topics,sharedSource:true,cap:1,modelIds:['openai/gpt-oss-20b']}).run();
+  assert.equal(drafts.length,topics.length,JSON.stringify(data));
+  assert.ok(data.topicResults.every(t=>t.created===1));
+});
+test('an existing pending draft returns availability without charging AI or changing cooldown',async()=>{
+  const h=harness({topics:['responsible_use'],duplicate:true});
+  const {data,drafts}=await h.run();
+  assert.equal(data.success,true);assert.equal(data.existingDraftsAvailable,1);assert.equal(drafts.length,0);
+  assert.equal(h.modelCalls.length,0);assert.equal(data.topicResults[0].status,'already_available');
+  assert.ok(!h.updates.some(u=>u.table==='automation_settings'));
+});
+test('a rate-limited Learning batch exposes pending topics for bounded frontend continuation',async()=>{
+  const h=harness({topics:FOCUS_TOPICS,modelIds:['fixture-model'],rateLimitedModels:['fixture-model']});
+  const {response,data}=await h.run();
+  assert.equal(response.status,202);assert.equal(data.retryable,true);
+  assert.equal(data.pendingTopics.length,5);assert.equal(data.retryAfterSeconds,60);
+  assert.ok(!h.updates.some(u=>u.table==='automation_settings'));
+});
+
+for(const count of [2,3,5]) test('Learning completes '+count+' selected topics through bounded deferred continuation',async()=>{
+  const topics=FOCUS_TOPICS.slice(0,count);
+  const h=harness({topics,sharedSource:true,shortSections:true,
+    modelIds:['openai/gpt-oss-20b','openai/gpt-oss-120b'],jsonFailureModel:'openai/gpt-oss-20b',repairRateLimitedModel:'openai/gpt-oss-120b'});
+  let pending=topics;
+  for(let attempt=0;attempt<count+1 && pending.length;attempt++) {
+    const {data}=await h.run(pending);
+    if(data.success) pending=[];
+    else { assert.equal(data.retryable,true,JSON.stringify(data)); pending=data.pendingTopics; }
+  }
+  assert.equal(pending.length,0);
+  const drafts=h.inserts.filter(i=>i.table==='generated_content_drafts');
+  assert.equal(drafts.length,count);assert.equal(new Set(drafts.map(d=>d.value.topic_id)).size,count);
+});
+test('a completed Learning batch charges the success cooldown',async()=>{
+  const h=harness({topics:['context']});
+  const {data}=await h.run();assert.equal(data.success,true);
+  assert.equal(h.updates.filter(u=>u.table==='automation_settings' && u.value.last_manual_run_at).length,1);
+});
+
+test('an already approved source/topic is an informational no-new-content result, without another AI call',async()=>{
+  const h=harness({topics:['responsible_use'],duplicate:true,duplicateStatus:'approved'});
+  const {data}=await h.run();assert.equal(data.noNewContent,true);assert.equal(data.draftsCreated,0);
+  assert.equal(h.modelCalls.length,0);assert.equal(data.error,undefined);
 });
