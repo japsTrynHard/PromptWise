@@ -239,6 +239,8 @@ class VerificationCase {
   final bool generated;
   final int sequence;
   final DateTime? approvedAt;
+  final bool answerHidden;
+  final List<VerificationDecision> decisionOptions;
 
   const VerificationCase({
     required this.id,
@@ -265,6 +267,8 @@ class VerificationCase {
     required this.generated,
     required this.sequence,
     this.approvedAt,
+    this.answerHidden = false,
+    this.decisionOptions = const [],
   });
 
   factory VerificationCase.fromMap(Map<String, dynamic> map) {
@@ -295,9 +299,9 @@ class VerificationCase {
       throw const FormatException('Verification case has an unknown subskill.');
     }
 
-    final correctDecision = VerificationDecisionX.tryFromId(
-      map['correct_decision']?.toString(),
-    );
+    final correctDecision =
+        VerificationDecisionX.tryFromId(map['correct_decision']?.toString()) ??
+        (map['answer_hidden'] == true ? VerificationDecision.unverified : null);
     if (correctDecision == null) {
       throw const FormatException(
         'Verification case has an unknown correct decision.',
@@ -333,6 +337,11 @@ class VerificationCase {
       generated: map['generated_by']?.toString() == 'content_automation',
       sequence: _asInt(map['sequence'], fallback: 1),
       approvedAt: _asDate(map['approved_at']),
+      answerHidden: map['answer_hidden'] == true,
+      decisionOptions: _stringList(map['decision_options'])
+          .map(VerificationDecisionX.tryFromId)
+          .whereType<VerificationDecision>()
+          .toList(growable: false),
     );
   }
 
@@ -340,7 +349,9 @@ class VerificationCase {
       id.trim().isNotEmpty &&
       title.trim().isNotEmpty &&
       scenario.trim().isNotEmpty &&
-      explanation.trim().isNotEmpty;
+      (answerHidden
+          ? decisionOptions.length >= 2
+          : explanation.trim().isNotEmpty);
 }
 
 class VerificationSession {
@@ -521,6 +532,7 @@ class VerificationCaseDraft {
   final String id;
   final String title;
   final String summary;
+  final Map<String, dynamic> payload;
   final VerificationSubskill subskill;
   final VerificationCaseType caseType;
   final int difficulty;
@@ -540,6 +552,7 @@ class VerificationCaseDraft {
     required this.sourceUrl,
     this.sourcePublishedAt,
     this.createdAt,
+    this.payload = const {},
   });
 
   factory VerificationCaseDraft.fromMap(Map<String, dynamic> map) {
@@ -554,6 +567,7 @@ class VerificationCaseDraft {
       throw const FormatException('Unknown draft subskill.');
     }
     return VerificationCaseDraft(
+      payload: Map.unmodifiable(draft),
       id: map['id']?.toString() ?? '',
       title: map['title']?.toString() ?? draft['title']?.toString() ?? '',
       summary: map['summary']?.toString() ?? draft['summary']?.toString() ?? '',

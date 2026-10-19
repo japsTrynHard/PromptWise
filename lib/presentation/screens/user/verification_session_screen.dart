@@ -523,6 +523,7 @@ class _SummaryView extends StatelessWidget {
 }
 
 List<VerificationDecision> _choicesFor(VerificationCase item) {
+  if (item.answerHidden) return item.decisionOptions;
   final base = <VerificationDecision>[];
   switch (item.caseType) {
     case VerificationCaseType.image:

@@ -91,15 +91,22 @@ Deno.serve(async (req) => {
         );
       }
 
+      const requestId = crypto.randomUUID();
+      const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')?.trim() ?? '';
+      let secureReservation = false;
       let reserved = false;
       let usage: unknown;
       try {
-        usage = await callUserRpc({
-          supabaseUrl,
-          anonKey,
-          userToken,
-          functionName: 'reserve_prompt_coach_ai_use',
-        });
+        try {
+          if (!serviceKey) throw new Error('AI Coach backend credentials unavailable.');
+          usage = await callBackendRpc(supabaseUrl, serviceKey, 'reserve_prompt_coach_ai_request', {p_request_id: requestId, p_user_id: user.id});
+          secureReservation = true;
+        } catch (error) {
+          // Staged rollout only: a missing NEW RPC means the migration is not
+          // installed. Permission/quota/network errors never downgrade security.
+          if (!/404.*(?:PGRST202|Could not find the function)/s.test(errorMessage(error))) throw error;
+          usage = await callUserRpc({supabaseUrl, anonKey, userToken, functionName: 'reserve_prompt_coach_ai_use'});
+        }
         reserved = true;
       } catch (error) {
         const detail = errorMessage(error);
@@ -127,25 +134,28 @@ Deno.serve(async (req) => {
           standardAnalysis,
           masteryContext,
           learnerRank,
+          signal: req.signal,
         });
 
+        if (secureReservation) await callBackendRpc(supabaseUrl, serviceKey, 'settle_prompt_coach_ai_request', {p_request_id: requestId, p_user_id: user.id, p_success: true});
         return response({ guidance, usage });
       } catch (error) {
+        let refunded = !reserved;
         if (reserved) {
-          await callUserRpc({
-            supabaseUrl,
-            anonKey,
-            userToken,
-            functionName: 'refund_prompt_coach_ai_use',
-          }).catch(() => null);
+          if (secureReservation) {
+            refunded = await callBackendRpc(supabaseUrl, serviceKey, 'settle_prompt_coach_ai_request', {p_request_id: requestId, p_user_id: user.id, p_success: false}).then(value => value === true).catch(() => false);
+          } else {
+            refunded = await callUserRpc({supabaseUrl, anonKey, userToken, functionName: 'refund_prompt_coach_ai_use'}).then(() => true).catch(() => false);
+          }
         }
+        const refundNote = refunded ? 'Your use was not consumed; Standard Coach remains available.' : 'Usage reconciliation is pending. Refresh your usage; Standard Coach remains available.';
         const detail = errorMessage(error);
         console.error('AI Coach generation failed:', detail);
         if (detail.toLowerCase().includes('rate') || detail.includes('429')) {
           return response(
             {
               message:
-                'AI Coach is busy right now. Your use was not consumed; Standard Coach remains available.',
+                `AI Coach is busy right now. ${refundNote}`,
             },
             429,
           );
@@ -153,7 +163,7 @@ Deno.serve(async (req) => {
         return response(
           {
             message:
-              'AI Coach could not provide guidance. Your use was not consumed; Standard Coach remains available.',
+              `AI Coach could not provide guidance. ${refundNote}`,
           },
           502,
         );
@@ -279,6 +289,7 @@ async function generateCoachGuidance({
   standardAnalysis,
   masteryContext,
   learnerRank,
+  signal,
 }: {
   apiKey: string;
   models: string[];
@@ -286,6 +297,7 @@ async function generateCoachGuidance({
   standardAnalysis: JsonRecord;
   masteryContext: JsonRecord;
   learnerRank: string;
+  signal?: AbortSignal;
 }): Promise<JsonRecord> {
   const rubricScores = asRecord(standardAnalysis.scores);
   const suggestions = asArray(standardAnalysis.suggestions)
@@ -328,6 +340,7 @@ ${prompt}`;
   for (const model of models) {
     const upstream = await fetch(`${GROQ_API}/chat/completions`, {
       method: 'POST',
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(30000)]) : AbortSignal.timeout(30000),
       headers: {
         Authorization: `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
@@ -479,4 +492,14 @@ function errorMessage(error: unknown): string {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function callBackendRpc(url: string, key: string, name: string, body: JsonRecord): Promise<unknown> {
+  const result = await fetch(`${url}/rest/v1/rpc/${name}`, {
+    method: 'POST', headers: {Authorization: `Bearer ${key}`, apikey: key, 'Content-Type': 'application/json'},
+    body: JSON.stringify(body), signal: AbortSignal.timeout(10000),
+  });
+  const value = await result.text();
+  if (!result.ok) throw new Error(`${result.status}: ${value}`);
+  return value ? JSON.parse(value) : null;
 }
